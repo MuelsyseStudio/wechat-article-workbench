@@ -220,7 +220,16 @@ export class ArticleIndexStore {
         }
       }
       if (meta.date && meta.title && item.title_key && item.title_key === titleKey) {
-        return { duplicate: true, reason: "account_date_title", existing: item };
+        // Never treat two articles as duplicates by title alone when they have distinct IDs, URLs, or timestamps!
+        const hasDiffReviewId = Boolean(meta.reviewId && item.review_id && meta.reviewId !== item.review_id);
+        const hasDiffArticleKey = Boolean(meta.articleKey && item.article_key && meta.articleKey !== item.article_key);
+        const hasDiffUrl = Boolean(meta.sourceUrl && item.source_url && meta.sourceUrl !== item.source_url);
+        const metaTs = String(meta.publishedAt || "").trim();
+        const itemTs = String(item.published_at || "").trim();
+        const hasDiffTimestamp = metaTs.length > 10 && itemTs.length > 10 && metaTs !== itemTs;
+        if (!hasDiffReviewId && !hasDiffArticleKey && !hasDiffUrl && !hasDiffTimestamp) {
+          return { duplicate: true, reason: "account_date_title", existing: item };
+        }
       }
     }
     return { duplicate: false };
@@ -243,7 +252,15 @@ export class ArticleIndexStore {
         return { knownEmpty: true, reason: item.reason || "empty_body", entry: item };
       }
       if (titleKey && item.title_key && item.title_key === titleKey) {
-        return { knownEmpty: true, reason: item.reason || "empty_body", entry: item };
+        const hasDiffReviewId = Boolean(meta.reviewId && item.review_id && meta.reviewId !== item.review_id);
+        const hasDiffArticleKey = Boolean(meta.articleKey && item.article_key && meta.articleKey !== item.article_key);
+        const hasDiffUrl = Boolean(meta.sourceUrl && item.source_url && meta.sourceUrl !== item.source_url);
+        const metaTs = String(meta.publishedAt || "").trim();
+        const itemTs = String(item.published_at || "").trim();
+        const hasDiffTimestamp = metaTs.length > 10 && itemTs.length > 10 && metaTs !== itemTs;
+        if (!hasDiffReviewId && !hasDiffArticleKey && !hasDiffUrl && !hasDiffTimestamp) {
+          return { knownEmpty: true, reason: item.reason || "empty_body", entry: item };
+        }
       }
     }
     return { knownEmpty: false };
@@ -259,6 +276,7 @@ export class ArticleIndexStore {
     sourceUrl = "",
     account = "",
     date = "",
+    publishedAt = "",
     title = "",
     reason = "empty_body",
     message = "",
@@ -266,13 +284,14 @@ export class ArticleIndexStore {
     if (!Array.isArray(this.data.skipped_empty)) {
       this.data.skipped_empty = [];
     }
-    const existing = this.findKnownEmpty({ reviewId, articleKey, sourceUrl, account, date, title });
+    const existing = this.findKnownEmpty({ reviewId, articleKey, sourceUrl, account, date, publishedAt, title });
     const titleKey = date && title ? normalizeTitleKey(account, date, title) : "";
     const now = formatLocalIsoNow();
     if (existing.knownEmpty && existing.entry) {
       if (reviewId && !existing.entry.review_id) existing.entry.review_id = reviewId;
       if (articleKey && !existing.entry.article_key) existing.entry.article_key = articleKey;
       if (sourceUrl && !existing.entry.source_url) existing.entry.source_url = sourceUrl;
+      if (publishedAt && !existing.entry.published_at) existing.entry.published_at = publishedAt;
       if (reason) existing.entry.reason = reason;
       if (message) existing.entry.message = message;
       existing.entry.recorded_at = now;
@@ -284,6 +303,7 @@ export class ArticleIndexStore {
       source_url: sourceUrl || "",
       account: account || "",
       date: date || "",
+      published_at: publishedAt || date || "",
       title: title || "",
       title_key: titleKey,
       reason: reason || "empty_body",
@@ -375,14 +395,25 @@ export class ArticleIndexStore {
       fileName = path.basename(fullPath);
       await fs.mkdir(path.dirname(fullPath), { recursive: true });
     } else {
+      const hhmm = String(meta.publishedAt || "").match(/\b(\d{2}):(\d{2})\b/);
+      let triedTimeSuffix = false;
       let suffix = 2;
       while (true) {
         try {
           await fs.access(fullPath);
           const rel = path.relative(this.outputDir, fullPath).replace(/\\/g, "/");
           const owner = this.data.articles.find((a) => a.relative_path === rel);
-          if (owner && owner.content_sha256 === contentHash) break;
-          fileName = `${baseName}_${suffix++}.md`;
+          const isSameId =
+            owner &&
+            ((meta.reviewId && owner.review_id === meta.reviewId) ||
+              (meta.articleKey && owner.article_key === meta.articleKey));
+          if (owner && isSameId) break;
+          if (!triedTimeSuffix && hhmm) {
+            triedTimeSuffix = true;
+            fileName = `${baseName}_${hhmm[1]}${hhmm[2]}.md`;
+          } else {
+            fileName = `${baseName}_${suffix++}.md`;
+          }
           fullPath = path.join(accountDir, fileName);
         } catch {
           break;

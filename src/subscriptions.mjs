@@ -502,6 +502,7 @@ export async function runSubscriptionsCheck({
             articleKey: uid.articleKey || "",
             account: item.account,
             date: item.date,
+            publishedAt: item.publishedAt || "",
             title: item.title,
           };
           const dup = store.findDuplicate({

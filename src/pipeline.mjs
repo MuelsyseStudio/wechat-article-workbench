@@ -1297,6 +1297,7 @@ export async function inspectWeReadAccounts(
             articleKey: uid.articleKey || "",
             account: item.account,
             date: item.date,
+            publishedAt: item.publishedAt || "",
             title: item.title,
           };
           const dup = activeStore.findDuplicate({
@@ -1523,6 +1524,7 @@ export async function syncWeReadAccounts(
         articleKey: uid.articleKey || "",
         account: item.account || "",
         date: item.date || "",
+        publishedAt: item.publishedAt || "",
         title: item.title || "",
       };
 
