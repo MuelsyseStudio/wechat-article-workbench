@@ -164,9 +164,10 @@ export class ArticleIndexStore {
     this.exportCsvPath = path.join(this.outputDir, "00_文章数据导出.csv");
     this.exportJsonlPath = path.join(this.outputDir, "wechat_articles.jsonl");
     this.data = {
-      version: "2.0",
+      version: "2.1",
       updated_at: "",
       articles: [],
+      skipped_empty: [],
     };
   }
 
@@ -176,10 +177,15 @@ export class ArticleIndexStore {
       const raw = await fs.readFile(this.indexJsonPath, "utf8");
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.articles)) {
-        this.data = parsed;
+        this.data = {
+          version: parsed.version || "2.1",
+          updated_at: parsed.updated_at || "",
+          articles: parsed.articles,
+          skipped_empty: Array.isArray(parsed.skipped_empty) ? parsed.skipped_empty : [],
+        };
       }
     } catch {
-      this.data = { version: "1.0", updated_at: "", articles: [] };
+      this.data = { version: "2.1", updated_at: "", articles: [], skipped_empty: [] };
     }
     return this.data;
   }
@@ -210,6 +216,86 @@ export class ArticleIndexStore {
       }
     }
     return { duplicate: false };
+  }
+
+  /**
+   * Check whether an article was already definitively confirmed as empty/deleted in a previous run.
+   */
+  findKnownEmpty(meta = {}) {
+    const list = Array.isArray(this.data.skipped_empty) ? this.data.skipped_empty : [];
+    const titleKey = meta.date && meta.title ? normalizeTitleKey(meta.account, meta.date, meta.title) : "";
+    for (const item of list) {
+      if (meta.reviewId && item.review_id && item.review_id === meta.reviewId) {
+        return { knownEmpty: true, reason: item.reason || "empty_body", entry: item };
+      }
+      if (meta.articleKey && item.article_key && item.article_key === meta.articleKey) {
+        return { knownEmpty: true, reason: item.reason || "empty_body", entry: item };
+      }
+      if (meta.sourceUrl && item.source_url && item.source_url === meta.sourceUrl) {
+        return { knownEmpty: true, reason: item.reason || "empty_body", entry: item };
+      }
+      if (titleKey && item.title_key && item.title_key === titleKey) {
+        return { knownEmpty: true, reason: item.reason || "empty_body", entry: item };
+      }
+    }
+    return { knownEmpty: false };
+  }
+
+  /**
+   * Record a definitively empty/deleted article so future runs skip it in 0ms without hitting network.
+   * Only call for confirmed empty/deleted responses (NEVER transient network or rate-limit errors).
+   */
+  recordKnownEmpty({
+    reviewId = "",
+    articleKey = "",
+    sourceUrl = "",
+    account = "",
+    date = "",
+    title = "",
+    reason = "empty_body",
+    message = "",
+  } = {}) {
+    if (!Array.isArray(this.data.skipped_empty)) {
+      this.data.skipped_empty = [];
+    }
+    const existing = this.findKnownEmpty({ reviewId, articleKey, sourceUrl, account, date, title });
+    const titleKey = date && title ? normalizeTitleKey(account, date, title) : "";
+    const now = formatLocalIsoNow();
+    if (existing.knownEmpty && existing.entry) {
+      if (reviewId && !existing.entry.review_id) existing.entry.review_id = reviewId;
+      if (articleKey && !existing.entry.article_key) existing.entry.article_key = articleKey;
+      if (sourceUrl && !existing.entry.source_url) existing.entry.source_url = sourceUrl;
+      if (reason) existing.entry.reason = reason;
+      if (message) existing.entry.message = message;
+      existing.entry.recorded_at = now;
+      return existing.entry;
+    }
+    const entry = {
+      review_id: reviewId || "",
+      article_key: articleKey || "",
+      source_url: sourceUrl || "",
+      account: account || "",
+      date: date || "",
+      title: title || "",
+      title_key: titleKey,
+      reason: reason || "empty_body",
+      message: message || "",
+      recorded_at: now,
+    };
+    this.data.skipped_empty.push(entry);
+    return entry;
+  }
+
+  removeKnownEmpty(meta = {}) {
+    if (!Array.isArray(this.data.skipped_empty) || this.data.skipped_empty.length === 0) return;
+    const titleKey = meta.date && meta.title ? normalizeTitleKey(meta.account, meta.date, meta.title) : "";
+    this.data.skipped_empty = this.data.skipped_empty.filter((item) => {
+      if (meta.reviewId && item.review_id && item.review_id === meta.reviewId) return false;
+      if (meta.articleKey && item.article_key && item.article_key === meta.articleKey) return false;
+      if (meta.sourceUrl && item.source_url && item.source_url === meta.sourceUrl) return false;
+      if (titleKey && item.title_key && item.title_key === titleKey) return false;
+      return true;
+    });
   }
 
   /**
@@ -362,6 +448,9 @@ export class ArticleIndexStore {
     } else {
       this.data.articles.push(entry);
     }
+
+    // If this article was previously marked empty and later succeeded on force-retry, remove from skipped_empty
+    this.removeKnownEmpty(meta);
 
     return {
       status: dup.duplicate ? "updated" : "saved",

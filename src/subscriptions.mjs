@@ -496,19 +496,21 @@ export async function runSubscriptionsCheck({
           if (acc.since && item.date && item.date < acc.since) continue;
 
           const uid = parseWechatUrlIdentity(item.url || "");
+          const probe = {
+            reviewId: item.reviewId,
+            sourceUrl: uid.canonicalUrl || item.url || "",
+            articleKey: uid.articleKey || "",
+            account: item.account,
+            date: item.date,
+            title: item.title,
+          };
           const dup = store.findDuplicate({
-            meta: {
-              reviewId: item.reviewId,
-              sourceUrl: uid.canonicalUrl || item.url || "",
-              articleKey: uid.articleKey || "",
-              account: item.account,
-              date: item.date,
-              title: item.title,
-            },
+            meta: probe,
             contentHash: "",
           });
+          const knownEmpty = store.findKnownEmpty(probe);
 
-          if (!dup.duplicate) {
+          if (!dup.duplicate && !knownEmpty.knownEmpty) {
             unseenOnThisPage++;
             newItems.push({ ...item, biz: acc.biz || "" });
             if (newItems.length >= effMaxPerAccount) break;

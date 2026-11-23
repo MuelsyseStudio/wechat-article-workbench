@@ -560,6 +560,32 @@ export async function batchFetchInputs(
         }
         continue;
       }
+
+      const knownEmpty = store.findKnownEmpty({
+        sourceUrl: uid.fetchUrl || url,
+        articleKey: uid.articleKey || "",
+      });
+      if (knownEmpty.knownEmpty) {
+        summary.skipped++;
+        summary.items.push({
+          url,
+          status: "skipped",
+          title: knownEmpty.entry?.title || "",
+          date: knownEmpty.entry?.date || "",
+          reason: `known_empty:${knownEmpty.reason}`,
+        });
+        if (onProgress) {
+          onProgress({
+            index: i + 1,
+            total: queue.length,
+            url,
+            status: "skipped",
+            title: knownEmpty.entry?.title || url,
+            reason: `known_empty:${knownEmpty.reason}`,
+          });
+        }
+        continue;
+      }
     }
 
     // Always wait full polite delay after album pagination OR between network fetches
@@ -607,6 +633,22 @@ export async function batchFetchInputs(
         summary.items.push({ url, status: "blocked", reason: res.reason, message: res.message });
         if (onProgress) onProgress({ index: i + 1, total: queue.length, url, status: "blocked", message: res.message });
         break;
+      }
+
+      if (
+        (res.status === "blocked" && res.reason === "article_deleted") ||
+        (res.status === "error" && res.reason === "empty_body")
+      ) {
+        const uid = parseWechatUrlIdentity(url);
+        store.recordKnownEmpty({
+          sourceUrl: uid.fetchUrl || url,
+          articleKey: uid.articleKey || "",
+          account: res.meta?.account || "",
+          date: res.meta?.date || "",
+          title: res.meta?.title || "",
+          reason: res.reason,
+          message: res.message || "",
+        });
       }
 
       if (res.status === "saved") summary.saved++;
@@ -1249,22 +1291,25 @@ export async function inspectWeReadAccounts(
           if (onlyOriginal && !item.isOriginal) continue;
 
           const uid = parseWechatUrlIdentity(item.url);
+          const itemMetaProbe = {
+            reviewId: item.reviewId,
+            sourceUrl: uid.canonicalUrl || item.url,
+            articleKey: uid.articleKey || "",
+            account: item.account,
+            date: item.date,
+            title: item.title,
+          };
           const dup = activeStore.findDuplicate({
-            meta: {
-              reviewId: item.reviewId,
-              sourceUrl: uid.canonicalUrl || item.url,
-              articleKey: uid.articleKey || "",
-              account: item.account,
-              date: item.date,
-              title: item.title,
-            },
+            meta: itemMetaProbe,
             contentHash: "",
           });
+          const emptyHit = activeStore.findKnownEmpty(itemMetaProbe);
 
           allMatched.push({
             ...item,
             biz: acc.biz || "",
             alreadyArchived: Boolean(dup.duplicate),
+            alreadyEmpty: Boolean(emptyHit.knownEmpty),
           });
           addedThisPage++;
           accCount++;
@@ -1304,7 +1349,8 @@ export async function inspectWeReadAccounts(
     }
 
     const archivedCount = allMatched.filter((x) => x.alreadyArchived).length;
-    const newCount = allMatched.length - archivedCount;
+    const emptyCount = allMatched.filter((x) => !x.alreadyArchived && x.alreadyEmpty).length;
+    const newCount = allMatched.length - archivedCount - emptyCount;
 
     return {
       kind: "weread_inspect",
@@ -1313,6 +1359,7 @@ export async function inspectWeReadAccounts(
       articleCount: allMatched.length,
       newCount,
       archivedCount,
+      emptyCount,
       articles: allMatched,
       urls: allMatched.map((x) => x.url).filter(Boolean),
       warnings,
@@ -1457,6 +1504,7 @@ export async function syncWeReadAccounts(
 
     let fetchedContentCount = 0;
     let metadataEnrichedCount = 0;
+    let emptyRecordedCount = 0;
     let consecutiveNetErrors = 0;
 
     for (let i = 0; i < candidates.length; i++) {
@@ -1468,18 +1516,19 @@ export async function syncWeReadAccounts(
 
       const item = candidates[i];
       const uid = parseWechatUrlIdentity(item.url || "");
+      const probeMeta = {
+        reviewId: item.reviewId || "",
+        sourceUrl: uid.canonicalUrl || item.url || "",
+        articleKey: uid.articleKey || "",
+        account: item.account || "",
+        date: item.date || "",
+        title: item.title || "",
+      };
 
-      // Instant local dedup check BEFORE calling /web/mp/content
+      // Instant local dedup & known-empty skip check BEFORE calling /web/mp/content
       if (!force) {
         const preDup = store.findDuplicate({
-          meta: {
-            reviewId: item.reviewId || "",
-            sourceUrl: uid.canonicalUrl || item.url || "",
-            articleKey: uid.articleKey || "",
-            account: item.account || "",
-            date: item.date || "",
-            title: item.title || "",
-          },
+          meta: probeMeta,
           contentHash: "",
         });
         if (preDup.duplicate) {
@@ -1513,6 +1562,31 @@ export async function syncWeReadAccounts(
               title: preDup.existing.title || item.title,
               date: preDup.existing.date || item.date,
               reason: `duplicate:${preDup.reason}`,
+            });
+          }
+          continue;
+        }
+
+        const knownEmpty = store.findKnownEmpty(probeMeta);
+        if (knownEmpty.knownEmpty) {
+          summary.skipped++;
+          summary.items.push({
+            reviewId: item.reviewId,
+            url: item.url,
+            status: "skipped",
+            title: item.title || knownEmpty.entry?.title || "",
+            date: item.date || knownEmpty.entry?.date || "",
+            reason: `known_empty:${knownEmpty.reason}`,
+          });
+          if (onProgress) {
+            onProgress({
+              index: i + 1,
+              total: candidates.length,
+              url: item.url,
+              status: "skipped",
+              title: item.title || knownEmpty.entry?.title || "",
+              date: item.date || knownEmpty.entry?.date || "",
+              reason: `known_empty:${knownEmpty.reason}`,
             });
           }
           continue;
@@ -1596,12 +1670,23 @@ export async function syncWeReadAccounts(
             break;
           }
 
+          // Record confirmed WeRead empty content (HTTP 200 with empty payload, errCode === -2) so future runs skip it
+          if (code === -2 && contentRes.status === 200) {
+            store.recordKnownEmpty({
+              ...probeMeta,
+              reason: "empty_body",
+              message: contentRes.errMsg || "微信读书返回的正文为空",
+            });
+            emptyRecordedCount++;
+          }
+
           summary.errors++;
           summary.items.push({
             reviewId: item.reviewId,
             url: item.url,
             status: "error",
             title: item.title,
+            reason: code === -2 ? "empty_body" : `weread_err_${code}`,
             message: contentRes.errMsg || "正文获取失败",
           });
           if (onProgress) {
@@ -1611,7 +1696,11 @@ export async function syncWeReadAccounts(
               url: item.url,
               status: "error",
               title: item.title,
-              message: contentRes.errMsg || "正文获取失败",
+              reason: code === -2 ? "empty_body" : "",
+              message:
+                code === -2
+                  ? `${contentRes.errMsg || "正文为空"}（已记入空文跳过名单，下次自动跳过）`
+                  : contentRes.errMsg || "正文获取失败",
             });
           }
           continue;
@@ -1675,6 +1764,15 @@ export async function syncWeReadAccounts(
 
         const body = htmlFragmentToMarkdown(bodyHtml, { imageUrlMap });
         if (!body || body.trim().length === 0) {
+          store.recordKnownEmpty({
+            ...probeMeta,
+            account: mergedMeta.account,
+            date: mergedMeta.date,
+            title: mergedMeta.title,
+            reason: "empty_body",
+            message: "正文提取为空",
+          });
+          emptyRecordedCount++;
           summary.errors++;
           summary.items.push({
             reviewId: item.reviewId,
@@ -1682,7 +1780,7 @@ export async function syncWeReadAccounts(
             status: "error",
             title: mergedMeta.title,
             reason: "empty_body",
-            message: "正文提取为空",
+            message: "正文提取为空（已记入空文跳过名单，下次自动跳过）",
           });
           if (onProgress) {
             onProgress({
@@ -1691,6 +1789,7 @@ export async function syncWeReadAccounts(
               status: "error",
               title: mergedMeta.title,
               reason: "empty_body",
+              message: "正文提取为空（已记入空文跳过名单，下次自动跳过）",
             });
           }
           continue;
@@ -1783,7 +1882,7 @@ export async function syncWeReadAccounts(
       }
     }
 
-    if (summary.saved > 0 || summary.updated > 0 || metadataEnrichedCount > 0) {
+    if (summary.saved > 0 || summary.updated > 0 || metadataEnrichedCount > 0 || emptyRecordedCount > 0) {
       await store.flush();
     }
     if (saveJsonl) {

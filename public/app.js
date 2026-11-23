@@ -548,7 +548,11 @@ function watchJob(jobId) {
         "ok"
       );
     } else if (d.status === "skipped") {
-      appendLog(`[${d.index}/${d.total}] ↷ 去重跳过：${label} (${d.reason || "duplicate"})`, "skip");
+      const isEmptySkip = String(d.reason || "").startsWith("known_empty");
+      appendLog(
+        `[${d.index}/${d.total}] ↷ ${isEmptySkip ? "已知空文跳过" : "去重跳过"}：${label} (${d.reason || "duplicate"})`,
+        "skip"
+      );
     } else if (d.status === "filtered_out") {
       appendLog(`[${d.index}/${d.total}] ○ 条件过滤：${label} (${d.reason || "filter"})`, "skip");
     } else if (d.status === "blocked") {
@@ -581,8 +585,9 @@ function watchJob(jobId) {
         appendLog(`⚠️ ${s.stopReason}`, "warn");
         showToast("请先扫码登录微信读书");
       } else {
+        const emptySuffix = s.emptyCount > 0 ? ` · 已知空文跳过 ${s.emptyCount} 篇` : "";
         appendLog(
-          `微信读书目录解析完成！共命中 ${s.articleCount || 0} 篇（新增待下载 ${s.newCount || 0} 篇 · 已归档 ${s.archivedCount || 0} 篇）。`,
+          `微信读书目录解析完成！共命中 ${s.articleCount || 0} 篇（新增待下载 ${s.newCount || 0} 篇 · 已归档 ${s.archivedCount || 0} 篇${emptySuffix}）。`,
           s.stoppedEarly ? "warn" : "ok"
         );
         if (Array.isArray(s.accounts) && s.accounts.length > 0) {
