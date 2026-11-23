@@ -1,0 +1,27 @@
+# Personal browser session & WeRead login cookies (NEVER COMMIT!)
+data/
+
+# Personal downloaded & archived articles (NEVER COMMIT!)
+公众号清洗归档/
+output/
+downloads/
+下载/
+
+# Portable Node runtime & release archives
+runtime/
+dist/
+release/
+*.zip
+*.tar.gz
+
+# Logs & temporary files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor & OS directories
+.vscode/
+.idea/
+node_modules/

@@ -1,0 +1,29 @@
+{
+  "name": "wechat-article-workbench",
+  "version": "2.1.0",
+  "description": "零依赖微信公众号文章采集、多号定时订阅与深度 Markdown 清洗工作台（Web UI + CLI + 本地 MCP）",
+  "license": "MIT",
+  "type": "module",
+  "private": false,
+  "keywords": [
+    "wechat",
+    "weread",
+    "markdown",
+    "mcp",
+    "knowledge-base",
+    "obsidian"
+  ],
+  "bin": {
+    "wxclean": "./cli.mjs",
+    "wxclean-mcp": "./mcp-server.mjs"
+  },
+  "scripts": {
+    "web": "node ./web-server.mjs --port 4546 --open",
+    "cli": "node ./cli.mjs",
+    "mcp": "node ./mcp-server.mjs",
+    "mcp:http": "node ./mcp-server.mjs --http --port 4546"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
