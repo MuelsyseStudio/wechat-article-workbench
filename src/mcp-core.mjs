@@ -15,6 +15,11 @@ import {
 } from "./pipeline.mjs";
 import { getWeReadStatus, openWeReadLoginWindow } from "./weread-cdp.mjs";
 import {
+  getMpAdminStatus,
+  openMpAdminLoginWindow,
+  searchMpAdminAccountsByName,
+} from "./mp-admin-cdp.mjs";
+import {
   addSubscriptions,
   loadSubscriptions,
   removeSubscriptionAccount,
@@ -25,7 +30,7 @@ import {
 
 export const SERVER_INFO = {
   name: "wechat-article-cleaner-mcp",
-  version: "2.1.0",
+  version: "2.2.0",
 };
 
 export const SUPPORTED_PROTOCOL_VERSION = "2025-06-18";
@@ -263,6 +268,30 @@ export const MCP_TOOLS = [
       },
     },
   },
+  {
+    name: "mp_admin_login_status",
+    description: "检查本机个人公众号后台（mp.weixin.qq.com）搜号登录态，或拉起浏览器供用户微信扫码登录（用于按公众号名称换算 MP_WXS_...）。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        open_browser: { type: "boolean", description: "设为 true 时打开公众号后台登录页" },
+        probe_api: { type: "boolean", description: "是否验证后台会话仍然有效，默认 true" },
+      },
+    },
+  },
+  {
+    name: "mp_admin_search_account",
+    description:
+      "通过个人公众号后台（/cgi-bin/searchbiz）按公众号名称搜索并自动换算为 MP_WXS_<数字> (bookId) 与 __biz，便于直接交给 weread_list_articles / weread_sync_articles / manage_wechat_subscriptions 使用。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "公众号名称关键词，例如 晚点LatePost" },
+        count: { type: "number", description: "返回匹配条数（1~10），默认 5" },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 export async function executeMcpTool(name, args = {}) {
@@ -421,6 +450,17 @@ export async function executeMcpTool(name, args = {}) {
         delayMs: typeof args.delay_ms === "number" ? args.delay_ms : null,
         downloadImages: typeof args.download_images === "boolean" ? args.download_images : null,
         saveJsonl: typeof args.save_jsonl === "boolean" ? args.save_jsonl : null,
+      });
+
+    case "mp_admin_login_status":
+      return args.open_browser
+        ? await openMpAdminLoginWindow({ includeQr: false })
+        : await getMpAdminStatus({ probeApi: args.probe_api !== false });
+
+    case "mp_admin_search_account":
+      return await searchMpAdminAccountsByName(args.query, {
+        count: typeof args.count === "number" ? Math.max(1, Math.min(10, args.count)) : 5,
+        autoLaunch: true,
       });
 
     default:

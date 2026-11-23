@@ -28,7 +28,14 @@ import {
   loadSavedWeReadAccounts,
   openWeReadLoginWindow,
   refreshWeReadLoginQr,
+  saveWeReadAccount,
 } from "./src/weread-cdp.mjs";
+import {
+  getMpAdminStatus,
+  openMpAdminLoginWindow,
+  refreshMpAdminLoginQr,
+  searchMpAdminAccountsByName,
+} from "./src/mp-admin-cdp.mjs";
 import {
   addSubscriptions,
   loadSubscriptions,
@@ -343,6 +350,7 @@ const server = http.createServer(async (req, res) => {
       const idx = await searchCleanedIndex({ outputDir, limit: 1 });
       const localDirs = await listCandidateLocalDirs();
       const wereadStatus = await getWeReadStatus({ probeApi: false });
+      const mpAdminStatus = await getMpAdminStatus({ probeApi: false });
       const savedWeReadAccounts = await loadSavedWeReadAccounts(idx.outputDir);
       const subsData = await loadSubscriptions({ outputDir: idx.outputDir });
       const dailyQuota = await getDailyWeReadQuota(idx.outputDir);
@@ -358,6 +366,7 @@ const server = http.createServer(async (req, res) => {
         mcpConfig: buildMcpConfig(),
         localDirSuggestions: localDirs,
         wereadStatus,
+        mpAdminStatus,
         savedWeReadAccounts,
         dailyQuota,
         subscriptionSummary: {
@@ -542,6 +551,56 @@ const server = http.createServer(async (req, res) => {
     if (pathname === "/api/weread/qr" && req.method === "GET") {
       const resQr = await refreshWeReadLoginQr();
       sendJson(res, 200, resQr);
+      return;
+    }
+
+    // MP Admin Account Name Search Helper (mp.weixin.qq.com /cgi-bin/searchbiz -> MP_WXS_<digits>)
+    if (pathname === "/api/mp-admin/status" && req.method === "GET") {
+      const probeApi = url.searchParams.get("probe") === "1";
+      const status = await getMpAdminStatus({ probeApi });
+      sendJson(res, 200, status);
+      return;
+    }
+
+    if (pathname === "/api/mp-admin/login" && req.method === "POST") {
+      const status = await openMpAdminLoginWindow({ includeQr: true });
+      sendJson(res, 200, status);
+      return;
+    }
+
+    if (pathname === "/api/mp-admin/qr" && req.method === "GET") {
+      const resQr = await refreshMpAdminLoginQr();
+      sendJson(res, 200, resQr);
+      return;
+    }
+
+    if (pathname === "/api/mp-admin/search" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const query = String(body.query || "").trim();
+      const count = Math.max(1, Math.min(10, Number(body.count) || 8));
+      if (!query) {
+        sendJson(res, 400, { error: "请输入要搜索的公众号名称" });
+        return;
+      }
+      const result = await searchMpAdminAccountsByName(query, { count, autoLaunch: true });
+      sendJson(res, 200, result);
+      return;
+    }
+
+    if (pathname === "/api/mp-admin/save-account" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const bookId = String(body.bookId || "").trim();
+      if (!bookId) {
+        sendJson(res, 400, { error: "缺少 bookId 参数" });
+        return;
+      }
+      await saveWeReadAccount({
+        bookId,
+        biz: String(body.biz || body.fakeid || "").trim(),
+        numericId: String(body.numericId || "").trim(),
+        accountName: String(body.accountName || body.nickname || "").trim(),
+      });
+      sendJson(res, 200, { ok: true, bookId });
       return;
     }
 
@@ -982,7 +1041,7 @@ server.on("error", (err) => {
 server.listen(PORT, HOST, () => {
   const webUrl = `http://${HOST}:${PORT}`;
   console.log(`========================================================`);
-  console.log(`  微信公众号文章采集、订阅与清洗工作台 v2.1 (Web + MCP)`);
+  console.log(`  微信公众号文章采集、订阅与清洗工作台 v2.2 (全量历史 + 搜号换算 + MCP)`);
   console.log(`  Web 界面: ${webUrl}`);
   console.log(`  MCP 端点: ${webUrl}/mcp`);
   console.log(`  默认归档: ${DEFAULT_OUTPUT_DIR}`);

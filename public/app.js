@@ -1,6 +1,6 @@
 /**
- * Frontend controller for WeChat Article Cleaner Workstation v2.0
- * Dual-channel: WeRead Full History Channel (Edge CDP) + Public Link Direct Fetch
+ * Frontend controller for WeChat Article Cleaner Workstation v2.2
+ * WeRead Full History Channel (Edge CDP) + MP Admin Account Search Helper (searchbiz) + Public Link Direct Fetch
  */
 const $ = (id) => document.getElementById(id);
 
@@ -13,6 +13,8 @@ const state = {
   localDirSuggestions: [],
   savedWeReadAccounts: [],
   wereadStatus: null,
+  mpAdminStatus: null,
+  qrModalMode: "weread", // "weread" | "mp_admin"
   loginPollTimer: null,
   activeJobId: null,
   activeEventSource: null,
@@ -22,6 +24,7 @@ const state = {
   lastParsedResult: null,
   lastWeReadCatalog: null,
   lastWeReadInputKey: "",
+  dailyQuota: null,
   subscriptionSummary: null,
   subscriptionsData: null,
   activeTab: "log",
@@ -79,7 +82,19 @@ function updateUrlCounter() {
 
   if (state.channel === "weread") {
     const idCount = bookIds.size + bizMatches.size;
-    $("urlCounter").textContent = `已识别 ${idCount} 个公众号 ID/__biz · ${articles.size} 条文章链接 · ${albums.size} 条合集链接`;
+    const nameLines = text
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(
+        (s) =>
+          s.length > 0 &&
+          s.length <= 40 &&
+          !/^https?:\/\//i.test(s) &&
+          !/\bMP_WXS_\d+/i.test(s) &&
+          !/[?&]__biz=/i.test(s)
+      );
+    const namePart = nameLines.length > 0 ? `${nameLines.length} 个公众号名 · ` : "";
+    $("urlCounter").textContent = `已识别 ${namePart}${idCount} 个 ID/__biz · ${articles.size} 条文章 · ${albums.size} 条合集`;
   } else {
     $("urlCounter").textContent = `已识别 ${articles.size} 条文章链接 · ${albums.size} 条合集链接`;
   }
@@ -171,6 +186,7 @@ function renderDailyQuota(q) {
   const used = Number(q.contentFetches || 0);
   const limit = Math.max(0, Number($("optDailyLimit")?.value ?? q.defaultLimit ?? 1200));
   el.classList.remove("quota-warn", "quota-over");
+  el.title = "单日微信读书正文拉取超过约 1500 篇极易触发 -2041 安全校验，建议控制在 1200~1500 篇以内";
   if (limit > 0) {
     el.textContent = `今日拉取：${used} / ${limit} 篇（建议每日 ≤ 1200~1500 防 -2041 风控）`;
     if (used >= limit) {
@@ -228,11 +244,47 @@ function renderMcpStatus() {
   }
 }
 
-function renderWeReadStatus(st) {
-  state.wereadStatus = st || null;
+function renderMpAdminModalStatus() {
+  const dot = $("mpModalStatusDot");
+  const text = $("mpModalStatusText");
+  if (!dot || !text) return;
+  const st = state.mpAdminStatus;
+  if (!st) {
+    dot.className = "dot dot-off";
+    text.textContent = "公众号后台：未检测";
+    return;
+  }
+  if (st.loggedIn) {
+    dot.className = "dot dot-pulse";
+    const who = st.accountName ? ` (${st.accountName})` : "";
+    text.textContent = `公众号后台：已登录${who} · 可直接按名称搜索换算 MP_WXS_...`;
+  } else if (st.browserRunning) {
+    dot.className = "dot dot-amber";
+    text.textContent = st.expired ? "公众号后台：登录过期，请重新扫码" : "公众号后台：等待微信扫码确认...";
+  } else {
+    dot.className = "dot dot-off";
+    text.textContent = st.profileExists
+      ? "公众号后台：本地已有档案（搜索时将自动唤醒）"
+      : "公众号后台：未登录（点击右侧按钮扫码个人订阅号即可搜名）";
+  }
+}
+
+function renderAuthStatusBar() {
   const dot = $("wereadStatusDot");
   const text = $("wereadStatusText");
   const hint = $("wereadHintText");
+  const wrDot = $("dotChannelWeRead");
+  const st = state.wereadStatus;
+
+  if (wrDot) {
+    wrDot.className = st?.loggedIn
+      ? "channel-dot dot-on"
+      : st?.browserRunning
+      ? "channel-dot dot-wait"
+      : "channel-dot dot-idle";
+  }
+
+  renderMpAdminModalStatus();
 
   if (!st) {
     dot.className = "dot dot-off";
@@ -245,7 +297,7 @@ function renderWeReadStatus(st) {
     const who = st.userName ? ` (${st.userName})` : st.vid ? ` (ID:${st.vid})` : "";
     text.textContent = `微信读书：已登录${who}`;
     hint.textContent = `已连接 ${st.browserName || "Edge"} 持久化会话，可直接全量解析与下载清洗`;
-    stopLoginPolling();
+    if (state.qrModalMode === "weread") stopLoginPolling();
   } else if (st.browserRunning) {
     dot.className = "dot dot-amber";
     text.textContent = st.expired ? "微信读书：登录过期" : "微信读书：等待扫码";
@@ -259,6 +311,16 @@ function renderWeReadStatus(st) {
       ? "本地已有登录档案，点击「登录微信读书」或直接「获取公众号目录」将自动唤醒独立 Edge"
       : "点击「登录微信读书」拉起独立 Edge 窗口微信扫码一次，Cookie 自动持久化";
   }
+}
+
+function renderWeReadStatus(st) {
+  state.wereadStatus = st || null;
+  renderAuthStatusBar();
+}
+
+function renderMpAdminStatus(st) {
+  state.mpAdminStatus = st || null;
+  renderMpAdminModalStatus();
 }
 
 function renderSavedAccounts() {
@@ -288,12 +350,14 @@ function renderSavedAccounts() {
 }
 
 function applyChannelUi(channel) {
-  state.channel = channel;
-  localStorage.setItem("wxclean_channel", channel);
-  const isWeRead = channel === "weread";
+  const valid = channel === "public" ? "public" : "weread";
+  state.channel = valid;
+  localStorage.setItem("wxclean_channel", valid);
+  const isWeRead = valid === "weread";
 
   $("btnChannelWeRead").classList.toggle("active", isWeRead);
   $("btnChannelWeRead").setAttribute("aria-selected", String(isWeRead));
+
   $("btnChannelPublic").classList.toggle("active", !isWeRead);
   $("btnChannelPublic").setAttribute("aria-selected", String(!isWeRead));
 
@@ -301,10 +365,10 @@ function applyChannelUi(channel) {
   $("pillDiscoverRelated").classList.toggle("hidden", isWeRead);
 
   if (isWeRead) {
-    $("inputSectionLabel").textContent = "公众号 ID / 文章链接 / 合集链接（自动换算 MP_WXS_...）";
+    $("inputSectionLabel").textContent = "公众号名 / ID / 链接（自动换算 MP_WXS_...）";
     $("urlInput").placeholder =
-      "提示：粘贴任意一篇该公众号文章链接、含 __biz 的合集链接，或直接输入 MP_WXS_1234567890（也可点击下方快捷公众号标签）";
-    $("inputFooterTip").textContent = "支持单篇链接自动换算全量历史 · 断点续传去重";
+      "提示：输入公众号名称（或点右上角「搜公众号名」）、粘贴任意单篇文章/合集链接、或直接输入 MP_WXS_1234567890";
+    $("inputFooterTip").textContent = "支持公众号名/单篇链接自动换算 · 断点续传去重";
     $("btnPrimaryLeft").className = "btn btn-weread";
     $("btnPrimaryLeftLabel").textContent = "登录微信读书";
     $("btnPrimaryLeftIcon").innerHTML =
@@ -322,6 +386,8 @@ function applyChannelUi(channel) {
     $("btnParseInputsLabel").textContent = "1.解析合集/清单";
   }
 
+  renderAuthStatusBar();
+  renderDailyQuota(state.dailyQuota);
   renderSavedAccounts();
   updateUrlCounter();
 }
@@ -333,60 +399,102 @@ function stopLoginPolling() {
   }
 }
 
-function startLoginPolling() {
+function startLoginPolling(mode = "weread") {
   stopLoginPolling();
+  state.qrModalMode = mode;
   let ticks = 0;
   state.loginPollTimer = setInterval(async () => {
     ticks++;
-    if (ticks > 60) {
+    if (ticks > 72) {
       stopLoginPolling();
       return;
     }
     try {
-      const res = await fetch("/api/weread/status?probe=1");
-      const st = await res.json();
-      renderWeReadStatus(st);
-      if (st.loggedIn) {
-        stopLoginPolling();
-        $("wereadLoginModal").classList.add("hidden");
-        appendLog(`✓ 微信读书扫码登录成功！当前账号：${st.userName || `vid:${st.vid}`}，现在可以点击「1.获取公众号目录」或「2.批量下载清洗」。`, "ok");
-        showToast("微信读书扫码登录成功！");
+      if (mode === "mp_admin") {
+        const res = await fetch("/api/mp-admin/status?probe=1");
+        const st = await res.json();
+        renderMpAdminStatus(st);
+        if (st.loggedIn) {
+          stopLoginPolling();
+          $("wereadLoginModal").classList.add("hidden");
+          const who = st.accountName ? `（${st.accountName}）` : "";
+          appendLog(
+            `✓ 个人公众号后台扫码登录成功${who}！现在可在「搜公众号名」中直接按名称换算 MP_WXS_...。`,
+            "ok"
+          );
+          showToast("公众号后台扫码成功，可以直接搜号了！");
+        } else if (st.scanTip) {
+          $("wereadModalStatusText").textContent = st.scanTip;
+        }
+      } else {
+        const res = await fetch("/api/weread/status?probe=1");
+        const st = await res.json();
+        renderWeReadStatus(st);
+        if (st.loggedIn) {
+          stopLoginPolling();
+          $("wereadLoginModal").classList.add("hidden");
+          appendLog(
+            `✓ 微信读书扫码登录成功！当前账号：${st.userName || `vid:${st.vid}`}，现在可以点击「1.获取公众号目录」或「2.批量下载清洗」。`,
+            "ok"
+          );
+          showToast("微信读书扫码登录成功！");
+        }
       }
     } catch {}
   }, 2500);
 }
 
-function showWeReadQrModal(dataUrl = "") {
+function showQrModal(mode = "weread", dataUrl = "") {
+  state.qrModalMode = mode;
+  const isMp = mode === "mp_admin";
+  $("wereadLoginModalTitle").textContent = isMp ? "微信扫码登录个人公众号后台" : "微信扫码登录微信读书";
+  $("wereadQrHint").textContent = isMp
+    ? "请用手机微信「扫一扫」扫描下方微信公众平台（mp.weixin.qq.com）官方二维码；扫码后在手机上选择你的个人公众号/订阅号并点击确认，工作台将在 3 秒内自动获取 token 并持久化会话。"
+    : "请直接用手机微信「扫一扫」扫描下方微信读书官方登录二维码；在手机上点击确认后，工作台将在 3 秒内自动完成登录并持久化保存 Cookie。";
   $("wereadLoginModal").classList.remove("hidden");
   if (dataUrl) {
     $("wereadQrImg").src = dataUrl;
     $("wereadQrImg").classList.remove("hidden");
     $("wereadQrLoading").classList.add("hidden");
-    $("wereadModalStatusText").textContent = "请用手机微信扫描上方二维码（或直接在弹出的 Edge 窗口扫码）";
+    $("wereadModalStatusText").textContent = isMp
+      ? "请用手机微信扫描上方二维码，并在手机上选择你的个人公众号确认登录"
+      : "请用手机微信扫描上方二维码（或直接在弹出的 Edge 窗口扫码）";
   } else {
     $("wereadQrImg").classList.add("hidden");
     $("wereadQrLoading").classList.remove("hidden");
-    $("wereadQrLoading").textContent = "正在打开微信读书并加载二维码，请稍候...";
+    $("wereadQrLoading").textContent = isMp
+      ? "正在打开微信公众平台（mp.weixin.qq.com）并截取实时二维码，请稍候..."
+      : "正在打开微信读书并加载二维码，请稍候...";
     $("wereadModalStatusText").textContent = "正在连接本地 Edge 窗口...";
   }
 }
 
 async function handleRefreshQrImage() {
+  const mode = state.qrModalMode || "weread";
+  const isMp = mode === "mp_admin";
   $("wereadQrImg").classList.add("hidden");
   $("wereadQrLoading").classList.remove("hidden");
-  $("wereadQrLoading").textContent = "正在刷新微信读书实时二维码...";
+  $("wereadQrLoading").textContent = isMp
+    ? "正在刷新公众号后台实时二维码..."
+    : "正在刷新微信读书实时二维码...";
   try {
-    const res = await fetch("/api/weread/qr");
+    const res = await fetch(isMp ? "/api/mp-admin/qr" : "/api/weread/qr");
     const data = await res.json();
     if (data.loggedIn) {
-      renderWeReadStatus(data);
+      if (isMp) renderMpAdminStatus(data);
+      else renderWeReadStatus(data);
       $("wereadLoginModal").classList.add("hidden");
-      appendLog(`✓ 微信读书已登录（${data.userName || `vid:${data.vid}`}）`, "ok");
-      showToast("微信读书已登录！");
+      appendLog(
+        isMp
+          ? `✓ 个人公众号后台已登录${data.accountName ? `（${data.accountName}）` : ""}`
+          : `✓ 微信读书已登录（${data.userName || `vid:${data.vid}`}）`,
+        "ok"
+      );
+      showToast(isMp ? "公众号后台已登录！" : "微信读书已登录！");
       return;
     }
     if (data.qrImageDataUrl) {
-      showWeReadQrModal(data.qrImageDataUrl);
+      showQrModal(mode, data.qrImageDataUrl);
       showToast("二维码已刷新");
     } else {
       $("wereadQrLoading").textContent = "未能截取二维码，请直接在任务栏切换到 Edge 窗口扫码";
@@ -399,7 +507,7 @@ async function handleRefreshQrImage() {
 async function handleWeReadLogin() {
   switchTab("log");
   appendLog("正在拉起独立可见的 Edge 窗口打开 https://weread.qq.com/ 并加载微信扫码登录...", "info");
-  showWeReadQrModal("");
+  showQrModal("weread", "");
   try {
     const res = await fetch("/api/weread/login", { method: "POST" });
     const data = await res.json();
@@ -416,7 +524,7 @@ async function handleWeReadLogin() {
       showToast("微信读书已登录");
     } else {
       if (data.qrImageDataUrl) {
-        showWeReadQrModal(data.qrImageDataUrl);
+        showQrModal("weread", data.qrImageDataUrl);
       } else {
         $("wereadQrLoading").textContent = "请在已弹出的 Edge 窗口中点击右上角「登录」并微信扫码（或点下方「刷新二维码」）";
       }
@@ -425,11 +533,51 @@ async function handleWeReadLogin() {
         "warn"
       );
       showToast("请用手机微信扫描二维码登录");
-      startLoginPolling();
+      startLoginPolling("weread");
     }
   } catch (err) {
     $("wereadLoginModal").classList.add("hidden");
     appendLog(`连接本地微信读书登录接口失败：${err.message}`, "err");
+  }
+}
+
+async function handleMpAdminLogin() {
+  switchTab("log");
+  appendLog("正在拉起独立可见的 Edge 窗口打开 https://mp.weixin.qq.com/ 并加载公众号后台微信扫码...", "info");
+  showQrModal("mp_admin", "");
+  try {
+    const res = await fetch("/api/mp-admin/login", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) {
+      $("wereadLoginModal").classList.add("hidden");
+      appendLog(`启动公众号后台登录窗口失败：${data.error || "未知错误"}`, "err");
+      showToast(data.error || "启动失败");
+      return;
+    }
+    renderMpAdminStatus(data);
+    if (data.loggedIn) {
+      $("wereadLoginModal").classList.add("hidden");
+      appendLog(
+        `✓ 检测到个人公众号后台已处于有效登录态${data.accountName ? `（${data.accountName}）` : ""}，档案目录：${data.profileDir}`,
+        "ok"
+      );
+      showToast("公众号后台已登录");
+    } else {
+      if (data.qrImageDataUrl) {
+        showQrModal("mp_admin", data.qrImageDataUrl);
+      } else {
+        $("wereadQrLoading").textContent = "请在已弹出的 Edge 窗口中扫描公众平台二维码（或点下方「刷新二维码」）";
+      }
+      appendLog(
+        `已在 ${data.browserName || "Edge"} 中打开微信公众平台并截取实时二维码，请微信扫码并在手机上选择你的个人公众号确认登录。`,
+        "warn"
+      );
+      showToast("请用手机微信扫描公众号后台二维码");
+      startLoginPolling("mp_admin");
+    }
+  } catch (err) {
+    $("wereadLoginModal").classList.add("hidden");
+    appendLog(`连接本地公众号后台登录接口失败：${err.message}`, "err");
   }
 }
 
@@ -440,7 +588,7 @@ async function handleRefreshWeReadStatus(silent = false) {
     renderWeReadStatus(st);
     if (!silent) {
       if (st.loggedIn) {
-        appendLog(`微信读书登录态有效：${st.userName || `vid:${st.vid}`}`, "ok");
+        appendLog(`1号微信读书登录态有效：${st.userName || `vid:${st.vid}`}`, "ok");
         showToast("微信读书登录态有效");
       } else if (st.browserRunning) {
         appendLog("微信读书窗口已打开但尚未完成扫码登录，请扫码后稍候。", "warn");
@@ -451,7 +599,29 @@ async function handleRefreshWeReadStatus(silent = false) {
       }
     }
   } catch (err) {
-    if (!silent) appendLog(`查询登录态失败：${err.message}`, "err");
+    if (!silent) appendLog(`查询微信读书登录态失败：${err.message}`, "err");
+  }
+}
+
+async function handleRefreshMpAdminStatus(silent = false) {
+  try {
+    const res = await fetch("/api/mp-admin/status?probe=1");
+    const st = await res.json();
+    renderMpAdminStatus(st);
+    if (!silent) {
+      if (st.loggedIn) {
+        appendLog(`2号个人公众号后台登录态有效${st.accountName ? `（${st.accountName}）` : ""}`, "ok");
+        showToast("公众号后台登录态有效");
+      } else if (st.browserRunning) {
+        appendLog("公众号后台窗口已打开但尚未完成扫码确认，请扫码并在手机选择个人公众号。", "warn");
+        showToast("等待公众号后台扫码");
+      } else {
+        appendLog("独立公众号后台浏览器未启动，请点击「登录公众号后台」。", "info");
+        showToast("公众号后台窗口未启动");
+      }
+    }
+  } catch (err) {
+    if (!silent) appendLog(`查询公众号后台登录态失败：${err.message}`, "err");
   }
 }
 
@@ -470,7 +640,9 @@ async function refreshState(printBootLog = false) {
     $("archivedCountTop").textContent = String(data.archivedCount || 0);
     $("archivedCountTab").textContent = String(data.archivedCount || 0);
     renderMcpStatus();
-    renderWeReadStatus(data.wereadStatus);
+    state.wereadStatus = data.wereadStatus || null;
+    state.mpAdminStatus = data.mpAdminStatus || null;
+    renderAuthStatusBar();
     renderSavedAccounts();
     renderSubscriptionSummary(data.subscriptionSummary);
     state.dailyQuota = data.dailyQuota || null;
@@ -507,11 +679,11 @@ async function refreshState(printBootLog = false) {
     }
 
     if (printBootLog) {
-      appendLog("工作台已升级至 v2.1（微信读书全量通道 + 多公众号自动订阅）：支持同时订阅多个公众号并按周期自动检测更新、下载并深度清洗入库。", "ok");
-      appendLog("使用方式：① 登录微信读书后，可随时切换到「公众号订阅」标签批量添加多个公众号并开启定时自动更新；② 也可在上方直接粘贴单篇/合集链接进行历史全量回溯。", "info");
+      appendLog("工作台已升级至 v2.2（微信读书全量通道 + 按公众号名搜号换算 + 多号自动订阅）：新增「搜公众号名」助手，输入名称一键换算 MP_WXS_...！", "ok");
+      appendLog("使用方式：① 登录微信读书后，可粘贴单篇/合集链接、点击「搜公众号名」按名查号，或直接切到「公众号订阅」开启多号定时自动更新；② 单日拉取建议控制在 1200~1500 篇以内以防风控。", "info");
       if (state.mcpEnabled && state.mcpConfig) {
         appendLog(
-          `MCP 服务已启动在 ${state.mcpUrl}（共 12 个工具，含多号订阅管理与自动同步），Streamable HTTP 配置示例：`,
+          `MCP 服务已启动在 ${state.mcpUrl}（共 14 个工具，含按名称搜号换算、全量同步与多号订阅），Streamable HTTP 配置示例：`,
           "ok",
           JSON.stringify(state.mcpConfig.streamableHttp, null, 2)
         );
@@ -544,6 +716,7 @@ function watchJob(jobId) {
       d.phase === "discover" ||
       d.phase === "weread_resolve" ||
       d.phase === "weread_list" ||
+      d.phase === "mp_admin" ||
       d.phase === "sub" ||
       d.phase === "sub_new"
     ) {
@@ -648,6 +821,7 @@ function watchJob(jobId) {
       state.lastParsedResult = s;
       const hasUrls = Array.isArray(s.urls) && s.urls.length > 0;
       $("btnSyncParsedWeRead").classList.add("hidden");
+      $("btnFillParsedUrls").textContent = "填入解析链接";
       $("btnFillParsedUrls").classList.toggle("hidden", !hasUrls);
       $("btnExportParsedCsv").classList.toggle("hidden", !hasUrls);
 
@@ -842,6 +1016,150 @@ async function startWeReadSyncJob({ usePrefetched = false } = {}) {
     watchJob(data.jobId);
   } catch (err) {
     appendLog(`请求失败：${err.message}`, "err");
+  }
+}
+
+function openMpSearchModal() {
+  $("mpSearchModal").classList.remove("hidden");
+  renderMpAdminModalStatus();
+  handleRefreshMpAdminStatus(true);
+  setTimeout(() => $("mpSearchQueryInput")?.focus(), 40);
+}
+
+function renderMpSearchResults(accounts = [], emptyMsg = "") {
+  const container = $("mpSearchResults");
+  if (!container) return;
+  if (!accounts || accounts.length === 0) {
+    container.innerHTML = "";
+    const div = document.createElement("div");
+    div.className = "mp-empty-hint";
+    div.textContent = emptyMsg || "未找到匹配的公众号，请换个关键词重试。";
+    container.appendChild(div);
+    return;
+  }
+  container.innerHTML = "";
+  for (const acc of accounts) {
+    const row = document.createElement("div");
+    row.className = "mp-result-item";
+
+    const meta = document.createElement("div");
+    meta.className = "mp-result-meta";
+
+    const nameRow = document.createElement("div");
+    nameRow.className = "mp-result-name-row";
+    const nameEl = document.createElement("span");
+    nameEl.className = "mp-result-name";
+    nameEl.textContent = acc.nickname || "未知公众号";
+    nameRow.appendChild(nameEl);
+    if (acc.alias) {
+      const aliasEl = document.createElement("span");
+      aliasEl.className = "mp-result-alias";
+      aliasEl.textContent = `微信号：${acc.alias}`;
+      nameRow.appendChild(aliasEl);
+    }
+
+    const idsEl = document.createElement("div");
+    idsEl.className = "mp-result-ids";
+    idsEl.textContent = `${acc.bookId || "无 bookId"}  ·  __biz=${acc.biz || acc.fakeid || "—"}`;
+
+    meta.append(nameRow, idsEl);
+
+    const ops = document.createElement("div");
+    ops.className = "mp-result-ops";
+
+    const btnFill = document.createElement("button");
+    btnFill.type = "button";
+    btnFill.className = "mini-btn mini-btn-primary";
+    btnFill.textContent = "填入采集框";
+    btnFill.addEventListener("click", async () => {
+      if (!acc.bookId) return showToast("该结果缺少有效的 MP_WXS ID");
+      await fetch("/api/mp-admin/save-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookId: acc.bookId,
+          biz: acc.biz || acc.fakeid,
+          numericId: acc.numericId || "",
+          accountName: acc.nickname || "",
+        }),
+      }).catch(() => {});
+      if (state.channel !== "weread") applyChannelUi("weread");
+      $("urlInput").value = acc.bookId;
+      updateUrlCounter();
+      $("mpSearchModal").classList.add("hidden");
+      appendLog(`已按名称换算并填入公众号：「${acc.nickname}」-> ${acc.bookId} (__biz=${acc.biz})`, "ok");
+      showToast(`已填入 ${acc.nickname} (${acc.bookId})`);
+      await refreshState(false);
+    });
+
+    const btnSub = document.createElement("button");
+    btnSub.type = "button";
+    btnSub.className = "mini-btn mini-btn-accent";
+    btnSub.textContent = "+ 订阅";
+    btnSub.addEventListener("click", async () => {
+      if (!acc.bookId) return showToast("该结果缺少有效的 MP_WXS ID");
+      await fetch("/api/mp-admin/save-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bookId: acc.bookId,
+          biz: acc.biz || acc.fakeid,
+          numericId: acc.numericId || "",
+          accountName: acc.nickname || "",
+        }),
+      }).catch(() => {});
+      const ok = await handleSubmitAddSubscriptions(acc.bookId, { category: "默认订阅" });
+      if (ok) {
+        $("mpSearchModal").classList.add("hidden");
+        switchTab("subs");
+      }
+    });
+
+    ops.append(btnFill, btnSub);
+    row.append(meta, ops);
+    container.appendChild(row);
+  }
+}
+
+async function handleMpSearchSubmit() {
+  const query = ($("mpSearchQueryInput")?.value || "").trim();
+  if (!query) {
+    showToast("请输入要搜索的公众号名称");
+    $("mpSearchQueryInput")?.focus();
+    return;
+  }
+  const btn = $("btnMpSearchGo");
+  btn.disabled = true;
+  btn.textContent = "搜索中...";
+  renderMpSearchResults([], `正在通过公众号后台搜索「${query}」...`);
+  try {
+    const res = await fetch("/api/mp-admin/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, count: 8 }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      const msg = data.errMsg || data.error || "搜索失败";
+      renderMpSearchResults([], msg);
+      if (data.needsLogin) {
+        showToast("请先点击「登录公众号后台」微信扫码");
+      } else {
+        showToast(msg);
+      }
+      await handleRefreshMpAdminStatus(true);
+      return;
+    }
+    await handleRefreshMpAdminStatus(true);
+    renderMpSearchResults(data.accounts || [], `未找到名为「${query}」的公众号`);
+    if ((data.accounts || []).length > 0) {
+      showToast(`搜到 ${data.accounts.length} 个匹配公众号`);
+    }
+  } catch (err) {
+    renderMpSearchResults([], `搜索请求失败：${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "搜索";
   }
 }
 
@@ -1331,7 +1649,7 @@ function bindEvents() {
   $("btnChannelWeRead").addEventListener("click", () => applyChannelUi("weread"));
   $("btnChannelPublic").addEventListener("click", () => applyChannelUi("public"));
 
-  // WeRead header & refresh buttons
+  // WeRead auth status header & refresh buttons
   $("pillWeReadStatus").addEventListener("click", () => {
     if (state.wereadStatus?.loggedIn) {
       handleRefreshWeReadStatus(false);
@@ -1340,6 +1658,20 @@ function bindEvents() {
     }
   });
   $("btnRefreshWeRead").addEventListener("click", () => handleRefreshWeReadStatus(false));
+
+  // MP Account Name Search Modal controls
+  $("btnSearchMpAccount").addEventListener("click", openMpSearchModal);
+  $("btnCloseMpSearchModal").addEventListener("click", () => $("mpSearchModal").classList.add("hidden"));
+  $("btnDoneMpSearchModal").addEventListener("click", () => $("mpSearchModal").classList.add("hidden"));
+  $("btnMpModalLogin").addEventListener("click", handleMpAdminLogin);
+  $("btnMpModalRefresh").addEventListener("click", () => handleRefreshMpAdminStatus(false));
+  $("btnMpSearchGo").addEventListener("click", handleMpSearchSubmit);
+  $("mpSearchQueryInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleMpSearchSubmit();
+    }
+  });
 
   // URL Input & Drag-drop
   $("urlInput").addEventListener("input", () => {

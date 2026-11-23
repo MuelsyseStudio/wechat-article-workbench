@@ -208,23 +208,25 @@ button.status-pill:hover {
   border-radius: 10px;
   background: var(--bg-subtle);
   border: 1px solid var(--border-color);
-  gap: 4px;
+  gap: 3px;
+  flex-wrap: wrap;
 }
 
 .channel-btn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 13px;
+  gap: 6px;
+  padding: 6px 11px;
   border-radius: 7px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .channel-btn:hover {
@@ -237,11 +239,37 @@ button.status-pill:hover {
   box-shadow: var(--shadow-sm);
 }
 
+.channel-btn.active-mp {
+  background: var(--bg-card);
+  color: #4f46e5;
+  box-shadow: var(--shadow-sm);
+}
+
+html.dark .channel-btn.active-mp {
+  color: #a5b4fc;
+}
+
 .channel-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--accent);
+  flex-shrink: 0;
+}
+
+.channel-dot.dot-on {
+  background: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+}
+
+.channel-dot.dot-wait {
+  background: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
+}
+
+.channel-dot.dot-idle {
+  background: #94a3b8;
+  box-shadow: none;
 }
 
 .channel-meta {
@@ -279,6 +307,177 @@ button.status-pill:hover {
 .btn-weread:hover:not(:disabled) {
   filter: brightness(1.07);
   transform: translateY(-1px);
+}
+
+.btn-mp-admin {
+  background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+  color: #ffffff;
+  box-shadow: 0 3px 10px rgba(79, 70, 229, 0.28);
+}
+
+.btn-mp-admin:hover:not(:disabled) {
+  filter: brightness(1.07);
+  transform: translateY(-1px);
+}
+
+.mini-btn.mini-btn-indigo {
+  background: rgba(79, 70, 229, 0.1);
+  color: #4338ca;
+  border-color: rgba(79, 70, 229, 0.32);
+  font-weight: 600;
+}
+
+html.dark .mini-btn.mini-btn-indigo {
+  background: rgba(99, 102, 241, 0.18);
+  color: #a5b4fc;
+  border-color: rgba(129, 140, 248, 0.35);
+}
+
+.mini-btn.mini-btn-indigo:hover {
+  border-color: #4f46e5;
+  color: #4f46e5;
+}
+
+html.dark .mini-btn.mini-btn-indigo:hover {
+  border-color: #818cf8;
+  color: #c7d2fe;
+}
+
+/* MP Account Name Search Modal */
+.modal-search {
+  width: min(590px, 94vw);
+}
+
+.mp-auth-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+
+.mp-auth-info {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.mp-auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mp-search-row {
+  display: flex;
+  gap: 8px;
+}
+
+.mp-search-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.mp-search-input:focus {
+  border-color: #4f46e5;
+}
+
+.mp-search-submit {
+  padding: 8px 18px;
+}
+
+.mp-results-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.mp-empty-hint {
+  padding: 20px 14px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong);
+}
+
+.mp-result-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  transition: border-color 0.15s ease;
+}
+
+.mp-result-item:hover {
+  border-color: var(--accent);
+}
+
+.mp-result-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mp-result-name-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.mp-result-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.mp-result-alias {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.mp-result-ids {
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.mp-result-ops {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mp-footnote {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.55;
 }
 
 .mini-btn.mini-btn-accent {

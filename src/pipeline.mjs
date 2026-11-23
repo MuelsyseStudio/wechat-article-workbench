@@ -36,6 +36,7 @@ import {
   politeDelayAbortable,
   saveWeReadAccount,
 } from "./weread-cdp.mjs";
+import { getMpAdminStatus, searchMpAdminAccountsByName } from "./mp-admin-cdp.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_OUTPUT_DIR = path.resolve(__dirname, "..", "公众号清洗归档");
@@ -1105,6 +1106,83 @@ export async function resolveWeReadAccountsFromInputs(
     }
   }
 
+  // 5. Support plain-text official account nicknames (local saved cache first -> optional MP Admin searchbiz)
+  const nameQueries = combinedText
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(
+      (s) =>
+        s.length > 0 &&
+        s.length <= 40 &&
+        !/^https?:\/\//i.test(s) &&
+        !/\bMP_WXS_\d+/i.test(s) &&
+        !/[?&]__biz=/i.test(s) &&
+        !/^[A-Za-z]:\\/.test(s) &&
+        !s.startsWith("/")
+    );
+
+  if (nameQueries.length > 0) {
+    let mpChecked = false;
+    let mpReady = false;
+    for (const q of nameQueries) {
+      const cached = savedAccounts.find(
+        (a) => a.accountName && a.accountName.toLowerCase() === q.toLowerCase() && a.bookId
+      );
+      if (cached) {
+        if (!resolvedMap.has(cached.bookId)) {
+          resolvedMap.set(cached.bookId, { ...cached, source: "local_name_cache" });
+          if (onProgress) {
+            onProgress({
+              phase: "weread_resolve",
+              message: `从本地缓存秒解公众号名「${cached.accountName}」-> ${cached.bookId}`,
+            });
+          }
+        }
+        continue;
+      }
+
+      if (!mpChecked) {
+        mpChecked = true;
+        const st = await getMpAdminStatus({ probeApi: false }).catch(() => null);
+        mpReady = Boolean(st?.loggedIn || st?.profileExists);
+      }
+
+      if (mpReady) {
+        if (onProgress) {
+          onProgress({ phase: "weread_resolve", message: `正在通过公众号后台 searchbiz 换算「${q}」-> MP_WXS_...` });
+        }
+        const sr = await searchMpAdminAccountsByName(q, { count: 5, autoLaunch: true }).catch(() => null);
+        if (sr?.ok && sr.accounts?.length > 0) {
+          const exact =
+            sr.accounts.find((a) => a.nickname.toLowerCase() === q.toLowerCase()) || sr.accounts[0];
+          if (exact?.bookId && !resolvedMap.has(exact.bookId)) {
+            resolvedMap.set(exact.bookId, {
+              bookId: exact.bookId,
+              biz: exact.biz,
+              numericId: exact.numericId,
+              accountName: exact.nickname || q,
+              sampleUrl: "",
+              source: "mp_admin_searchbiz",
+            });
+            if (onProgress) {
+              onProgress({
+                phase: "weread_resolve",
+                message: `搜号换算成功：「${exact.nickname}」-> ${exact.bookId} (__biz=${exact.biz})`,
+              });
+            }
+            continue;
+          }
+        } else if (sr?.needsLogin) {
+          mpReady = false;
+        }
+      }
+
+      warnings.push(
+        `未在本地缓存识别公众号名「${q}」；请点击「搜公众号名」扫码个人公众号后台直接搜号换算，或粘贴该号任意一篇文章链接`
+      );
+    }
+  }
+
   const accounts = [...resolvedMap.values()];
   for (const acc of accounts) {
     await saveWeReadAccount(acc);
@@ -1979,3 +2057,4 @@ export async function syncWeReadAccounts(
     session.close();
   }
 }
+

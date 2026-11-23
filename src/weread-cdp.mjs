@@ -304,7 +304,7 @@ export class CdpClient {
   }
 }
 
-async function fetchCdpJson(endpointPath, { timeoutMs = 1500, port = WEREAD_CDP_PORT } = {}) {
+export async function fetchCdpJson(endpointPath, { timeoutMs = 1500, port = WEREAD_CDP_PORT } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -329,7 +329,7 @@ function psSingleQuote(s) {
  * of msedge.exe to create an invisible window (MainWindowHandle == 0).
  * Using PowerShell Start-Process -WindowStyle Normal guarantees a real visible desktop window.
  */
-async function launchVisibleBrowserProcess(executablePath, launchArgs) {
+export async function launchVisibleBrowserProcess(executablePath, launchArgs) {
   if (process.platform === "win32") {
     const quotedArgs = launchArgs
       .map((a) => {
@@ -361,7 +361,7 @@ async function launchVisibleBrowserProcess(executablePath, launchArgs) {
  * Check if the running CDP browser actually has a visible desktop HWND on Windows,
  * and restore/bring it to the foreground. Returns { visible, hwnd, pid }.
  */
-async function ensureWindowsWindowVisibleAndFront(port = WEREAD_CDP_PORT) {
+export async function ensureWindowsWindowVisibleAndFront(port = WEREAD_CDP_PORT) {
   if (process.platform !== "win32") return { visible: true, hwnd: 0, pid: 0 };
   const psScript = `
 $ErrorActionPreference = 'SilentlyContinue'

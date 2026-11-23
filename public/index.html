@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>微信公众号文章采集与清洗工作台 · 多号订阅版</title>
+  <title>微信公众号文章采集与清洗工作台 · 微信读书全量 + 搜号订阅版</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -21,7 +21,7 @@
         <div class="brand-text">
           <div class="brand-title-row">
             <h1>微信公众号文章采集与清洗工作台</h1>
-            <span class="badge badge-teal">v2.1 · 微信读书全量 + 多号订阅</span>
+            <span class="badge badge-teal">v2.2 · 全量历史 + 搜号换算 + 多号订阅</span>
           </div>
           <p class="brand-sub" id="outputDirLabel">归档目录：加载中...</p>
         </div>
@@ -53,7 +53,7 @@
       <div class="channel-bar">
         <div class="channel-switch" role="tablist" aria-label="采集通道切换">
           <button type="button" class="channel-btn active" id="btnChannelWeRead" role="tab" aria-selected="true">
-            <span class="channel-dot"></span>
+            <span class="channel-dot dot-idle" id="dotChannelWeRead"></span>
             <span>微信读书通道（全量历史 · 推荐）</span>
           </button>
           <button type="button" class="channel-btn" id="btnChannelPublic" role="tab" aria-selected="false">
@@ -71,8 +71,12 @@
         <!-- Left Input Area -->
         <div class="input-panel">
           <div class="panel-label-row">
-            <label for="urlInput" class="section-label" id="inputSectionLabel">公众号 ID / 文章链接 / 合集链接（自动换算 MP_WXS_...）</label>
+            <label for="urlInput" class="section-label" id="inputSectionLabel">公众号名 / ID / 链接（自动换算 MP_WXS_...）</label>
             <div class="inline-actions">
+              <button type="button" class="mini-btn mini-btn-indigo" id="btnSearchMpAccount" title="通过个人公众号后台按名称搜索任意公众号并换算为 MP_WXS_...">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                搜公众号名
+              </button>
               <button type="button" class="mini-btn mini-btn-accent" id="btnQuickSubscribe" title="将输入框中的公众号一键加入定时订阅列表">
                 + 订阅此号
               </button>
@@ -386,7 +390,50 @@
     </section>
   </div>
 
-  <!-- Modal: WeRead QR Login -->
+  <!-- Modal: Search Official Account by Name (MP Admin searchbiz -> MP_WXS_...) -->
+  <div class="modal-backdrop hidden" id="mpSearchModal">
+    <div class="modal-card modal-search" role="dialog" aria-modal="true" aria-labelledby="mpSearchModalTitle">
+      <div class="modal-header">
+        <h2 id="mpSearchModalTitle">按公众号名称搜索 &amp; 换算 MP_WXS_...</h2>
+        <button type="button" class="icon-close" id="btnCloseMpSearchModal" aria-label="关闭">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="mp-auth-bar">
+          <div class="mp-auth-info">
+            <span class="dot dot-off" id="mpModalStatusDot"></span>
+            <span id="mpModalStatusText">公众号后台：未登录（扫码个人订阅号即可直接按名搜号）</span>
+          </div>
+          <div class="mp-auth-actions">
+            <button type="button" class="mini-btn mini-btn-indigo" id="btnMpModalLogin">登录公众号后台</button>
+            <button type="button" class="mini-btn" id="btnMpModalRefresh">刷新状态</button>
+          </div>
+        </div>
+
+        <div class="mp-search-row">
+          <input
+            type="search"
+            id="mpSearchQueryInput"
+            class="mp-search-input"
+            placeholder="输入公众号名称，例如：人民日报、晚点LatePost、第一财经..."
+          />
+          <button type="button" class="btn btn-mp-admin mp-search-submit" id="btnMpSearchGo">搜索</button>
+        </div>
+
+        <div class="mp-results-list" id="mpSearchResults">
+          <div class="mp-empty-hint">输入公众号名称并点击「搜索」，即可一键换算为 <code>MP_WXS_&lt;数字&gt;</code>，直接填入采集框或加入多号自动订阅。</div>
+        </div>
+
+        <p class="mp-footnote">
+          说明：本助手通过个人公众号后台 <code>searchbiz</code> 接口按名称换算 <code>__biz / MP_WXS_...</code>；历史正文与阅读数统一走「微信读书通道」抓取（微信官方已于 2026 年 7 月关停后台跨号历史文章列表接口）。
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btnDoneMpSearchModal">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: WeRead / MP Admin QR Login -->
   <div class="modal-backdrop hidden" id="wereadLoginModal">
     <div class="modal-card modal-qr" role="dialog" aria-modal="true" aria-labelledby="wereadLoginModalTitle">
       <div class="modal-header">

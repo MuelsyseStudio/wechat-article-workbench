@@ -7,8 +7,9 @@
 
 ## 核心特性
 
-- **双通道采集引擎**
-  - **微信读书通道（全量历史 · 推荐）**：通过本地 Edge/Chrome 原生 CDP 驱动 [微信读书网页版](https://weread.qq.com/)，工作台内嵌实时微信扫码弹窗，Cookie 持久化在本地 `data/weread-profile/`。支持粘贴**单篇文章链接 / 含 `__biz=` 的合集链接 / `MP_WXS_<数字>`** 自动换算并拉取全量历史目录（含阅读数 `readNum`、点赞数 `likeNum`），断点续传 + 自动防限速熔断。
+- **双通道采集 + 按公众号名搜号换算**
+  - **微信读书通道（全量历史 + 阅读点赞数 · 推荐）**：通过本地 Edge/Chrome 原生 CDP 驱动 [微信读书网页版](https://weread.qq.com/)，工作台内嵌实时微信扫码弹窗，Cookie 持久化在本地 `data/weread-profile/`，支持 `wr_rt` 无感续期。支持输入**公众号名称 / 单篇文章链接 / 含 `__biz=` 的合集链接 / `MP_WXS_<数字>`** 自动换算并拉取全量历史目录（含阅读数 `readNum`、点赞数 `likeNum`），断点续传 + 自动防限速熔断 + 单日配额护栏。
+  - **搜公众号名助手（`searchbiz` 换算 `MP_WXS_...`）**：可选扫码个人微信公众平台（`data/mp-admin-profile/`），直接输入任意公众号名称秒查并换算为 `MP_WXS_<数字>` 与 `__biz`，一键填入采集框或加入多号定时订阅（无需先手动找文章链接）。
   - **公开链接直抓 & 本地目录净化**：支持单篇/多行公开链接、公开合集（`appmsgalbum`）、TXT/CSV/JSON 链接清单拖拽导入、自动探测合集与文内关联推荐，以及深度净化其他工具导出的脏 `.html`/`.md` 文件。
 - **多公众号定时自动订阅**
   - 支持批量添加多个公众号、分组管理、单号独立启停、自定义检查间隔（15 分钟 ~ 每天）。
@@ -16,9 +17,9 @@
 - **高质量 Markdown 深度清洗 & 多层去重**
   - 自动剥离微信头尾 UI 垃圾文本（`预览时标签不可点`、`继续滑动看下一个`、`取消 允许` 等）。
   - 自动写入规范 YAML Frontmatter（`title`、`account`、`author`、`published_at`、`ip_region`、`read_num`、`like_num`、`source_url`、`content_sha256`、`tags`）。
-  - 基于 `review_id` / `article_key` / `source_url` / `content_sha256` / `公众号+日期+标题` 多层去重，自动维护 `00_文章索引.md`，支持一键导出 Excel UTF-8 BOM CSV 与 `wechat_articles.jsonl`。
-- **开箱即用的本地 MCP 服务（12 个工具）**
-  - 界面一键实时启停 `Streamable HTTP` MCP（默认 `http://127.0.0.1:4546/mcp`），同时也支持独立 `stdio` 模式（`node mcp-server.mjs`），可直接接入各类 AI 客户端检索、同步和管理公众号订阅。
+  - 基于 `review_id` / `article_key` / `source_url` / `content_sha256` / `公众号+日期+标题+时间戳` 多层去重（同日同标题不同发布时间会自动保留并追加 `_HHmm` 后缀），自动维护 `00_文章索引.md`，支持一键导出 Excel UTF-8 BOM CSV 与 `wechat_articles.jsonl`。
+- **开箱即用的本地 MCP 服务（14 个工具）**
+  - 界面一键实时启停 `Streamable HTTP` MCP（默认 `http://127.0.0.1:4546/mcp`），同时也支持独立 `stdio` 模式（`node mcp-server.mjs`），可直接接入各类 AI 客户端搜号、检索、同步和管理公众号订阅。
 
 ---
 
@@ -60,13 +61,17 @@ node cli.mjs weread-list MP_WXS_1234567890 --from 2024-01-01
 # 3. 批量拉取正文并深度清洗为干净 Markdown（断点续传去重）
 node cli.mjs weread-sync MP_WXS_1234567890 --from 2024-01-01 --delay 4000 --jsonl
 
-# 4. 多公众号定时订阅管理
+# 4. 按公众号名称搜索并换算为 MP_WXS_<数字>（基于个人公众号后台 searchbiz）
+node cli.mjs mp-login
+node cli.mjs mp-search "公众号名称"
+
+# 5. 多公众号定时订阅管理
 node cli.mjs sub-list
 node cli.mjs sub-add MP_WXS_1234567890 https://mp.weixin.qq.com/s/xxxxxxx --category 投研
 node cli.mjs sub-sync
 node cli.mjs sub-watch --interval 60
 
-# 5. 公开链接抓取 / 本地目录净化 / 知识库检索
+# 6. 公开链接抓取 / 本地目录净化 / 知识库检索
 node cli.mjs fetch https://mp.weixin.qq.com/s/xxxxxxx
 node cli.mjs clean-dir "/path/to/exported/articles"
 node cli.mjs index --keyword 关键词
@@ -119,7 +124,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-portable-zip.ps1
 ## 隐私、防风控与合规声明
 
 - **防风控配额建议（重要）**：微信读书对单个账号存在单日接口频率保护（实测单日连续拉取接近 1,500~1,800 篇易触发 `-2041 ErrorNeedVerify` 安全校验）。本工作台已内置**单日安全上限（默认 `1,200` 篇/日，界面可自定义）**、**每 35 篇自动冷却**、**软频控「操作频繁」自动退避重试**以及**长期凭证 `wr_rt` 无感续期**；批量回溯大号历史时建议等待时间设为 `4~6` 秒并分天完成（已归档篇目和已知空文下次均 0 耗时自动跳过）。
-- 本工具所有数据（微信读书登录态 `data/weread-profile/`、订阅配置 `data/subscriptions.json`、归档文章 `公众号清洗归档/`）均**严格保存在用户本地设备**，无任何远程上报或第三方服务器中转。
+- 本工具所有数据（微信读书登录态 `data/weread-profile/`、公众号后台搜号登录态 `data/mp-admin-profile/`、订阅配置 `data/subscriptions.json`、归档文章 `公众号清洗归档/`）均**严格保存在用户本地设备**，无任何远程上报或第三方服务器中转。
 - 严格遵循合规边界：**绝不绕过人机验证、验证码或登录鉴权**；遇到平台频控或登录失效会立即安全停止并保留已完成归档。
 - 本项目仅供个人学习、研究与合法资料整理备份，请尊重原创作者版权并遵守微信与微信读书平台相关用户协议，请勿高频滥用或用于商业非法采集。
 

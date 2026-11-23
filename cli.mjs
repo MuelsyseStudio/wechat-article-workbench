@@ -14,7 +14,12 @@ import {
   searchCleanedIndex,
   syncWeReadAccounts,
 } from "./src/pipeline.mjs";
-import { getWeReadStatus, openWeReadLoginWindow } from "./src/weread-cdp.mjs";
+import { getWeReadStatus, openWeReadLoginWindow, saveWeReadAccount } from "./src/weread-cdp.mjs";
+import {
+  getMpAdminStatus,
+  openMpAdminLoginWindow,
+  searchMpAdminAccountsByName,
+} from "./src/mp-admin-cdp.mjs";
 import {
   addSubscriptions,
   loadSubscriptions,
@@ -24,12 +29,14 @@ import {
 } from "./src/subscriptions.mjs";
 
 function printHelp() {
-  console.log(`微信公众号文章采集、多号订阅与深度清洗工具 (wxclean v2.1.0)
+  console.log(`微信公众号文章采集、多号订阅与深度清洗工具 (wxclean v2.2.0)
 
 用法:
   node cli.mjs weread-login                     拉起可见 Edge/Chrome 打开微信读书网页版扫码登录
-  node cli.mjs weread-list <url|bookId> [选项]  通过微信读书接口解析公众号全量历史目录
-  node cli.mjs weread-sync <url|bookId> [选项]  通过微信读书接口批量拉取正文并深度清洗入库
+  node cli.mjs weread-list <名称|url|bookId>    通过微信读书接口解析公众号全量历史目录（支持公众号名）
+  node cli.mjs weread-sync <名称|url|bookId>    通过微信读书接口批量拉取正文并深度清洗入库
+  node cli.mjs mp-login                         打开个人公众号后台 (mp.weixin.qq.com) 扫码（用于搜公众号名）
+  node cli.mjs mp-search <公众号名称>           按公众号名称搜索并自动换算为 MP_WXS_<数字> 与 __biz
   node cli.mjs sub-list                         查看已订阅的多公众号列表与自动更新配置
   node cli.mjs sub-add <url|bookId...> [选项]   订阅一个或多个公众号（支持单篇/合集链接或 MP_WXS_...）
   node cli.mjs sub-remove <bookId>              退订指定公众号（保留本地已下载文章）
@@ -253,6 +260,56 @@ async function main() {
     });
     renderSummary("微信读书通道同步结果", res, opts.json);
     if (!opts.json && res.jsonlFile) console.log(`JSONL 文件: ${res.jsonlFile}`);
+    return;
+  }
+
+  if (command === "mp-login") {
+    const res = await openMpAdminLoginWindow({ includeQr: false });
+    if (opts.json) {
+      console.log(JSON.stringify(res, null, 2));
+    } else if (res.loggedIn) {
+      console.log(`✓ 公众号后台已登录（${res.accountName || `token:${res.token}`}），持久化目录：${res.profileDir}`);
+    } else {
+      console.log(`已打开 ${res.browserName} 访问 https://mp.weixin.qq.com/，请用微信扫码并选择你的个人公众号登录。`);
+    }
+    return;
+  }
+
+  if (command === "mp-status") {
+    const res = await getMpAdminStatus({ probeApi: true });
+    console.log(JSON.stringify(res, null, 2));
+    return;
+  }
+
+  if (command === "mp-search") {
+    const query = args.join(" ").trim();
+    if (!query) {
+      console.error("错误：请提供要搜索的公众号名称，例如：node cli.mjs mp-search 晚点LatePost");
+      process.exit(1);
+    }
+    const res = await searchMpAdminAccountsByName(query, { count: 8, autoLaunch: true });
+    if (opts.json) {
+      console.log(JSON.stringify(res, null, 2));
+    } else if (!res.ok) {
+      console.error(`⚠️ 搜索失败：${res.errMsg || "未知错误"}`);
+      process.exit(1);
+    } else if (!res.accounts || res.accounts.length === 0) {
+      console.log(`未找到与「${query}」匹配的公众号。`);
+    } else {
+      console.log(`\n搜到 ${res.accounts.length} 个匹配公众号（可直接把 MP_WXS_... 传给 weread-list / weread-sync / sub-add）：`);
+      for (const a of res.accounts) {
+        console.log(`  - ${a.nickname}${a.alias ? ` (微信号: ${a.alias})` : ""} -> ${a.bookId}  [__biz=${a.biz}]`);
+      }
+      const exact = res.accounts.find((a) => a.nickname.toLowerCase() === query.toLowerCase()) || res.accounts[0];
+      if (exact?.bookId) {
+        await saveWeReadAccount({
+          bookId: exact.bookId,
+          biz: exact.biz,
+          numericId: exact.numericId,
+          accountName: exact.nickname,
+        });
+      }
+    }
     return;
   }
 
