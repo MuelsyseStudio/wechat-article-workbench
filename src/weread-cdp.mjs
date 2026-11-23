@@ -1133,6 +1133,9 @@ export function formatWeReadErrMsg(errCode, rawMsg = "") {
   if (code === -2012 || code === -2010) {
     return `微信读书登录已过期 (${code}${rawMsg ? `: ${rawMsg}` : ""})，请点击「登录微信读书」重新微信扫码`;
   }
+  if (code === -2041) {
+    return "触发微信读书安全校验 / 单日频控保护 (-2041: ErrorNeedVerify)，已按合规策略立即停止。请先暂停抓取等待冷却（或自行在微信读书网页/App 正常访问），后续建议将等待时间调大至 5~8 秒并分批回溯历史";
+  }
   if (code === -2013 || code === 429 || /limit|freq|频繁|限速/i.test(String(rawMsg))) {
     return `触发微信读书接口限速 (${code}${rawMsg ? `: ${rawMsg}` : ""})，已安全停止，已保存的文章不会丢失，请稍后放慢间隔继续`;
   }

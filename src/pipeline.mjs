@@ -1653,7 +1653,7 @@ export async function syncWeReadAccounts(
           const isAuthExpired =
             code === -2012 || code === -2010 || code === 401 || /过期|登录超时/.test(contentRes.errMsg || "");
           const isHardRateLimit =
-            !isSoftRateLimit && (code === -2013 || code === 403 || code === 429 || /限速/.test(contentRes.errMsg || ""));
+            !isSoftRateLimit && (code === -2013 || code === -2041 || code === 403 || code === 429 || /限速|安全校验/.test(contentRes.errMsg || ""));
 
           if (isNetDrop) consecutiveNetErrors++;
           else consecutiveNetErrors = 0;
