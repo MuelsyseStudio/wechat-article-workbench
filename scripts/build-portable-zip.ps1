@@ -85,7 +85,7 @@ $QuickStartTxt = @"
 【温馨提示】
 - 本绿色版已内置官方 Node.js 运行时（runtime\node.exe），无需额外安装任何环境；
 - 需要本机装有 Microsoft Edge（Win10/Win11 默认自带）或 Google Chrome；
-- 首次全量回溯历史文章建议等待时间保持 3~5 秒、分时间段拉取，避免触发微信读书频控限速。
+- 首次全量回溯历史文章建议等待时间保持 4~6 秒、单日拉取总量不要超过 1200~1500 篇（内置每日安全上限默认 1200 篇），避免触发微信读书 -2041 频控校验。
 "@
 Set-Content -LiteralPath (Join-Path $PortableStage "使用说明（先看这里）.txt") -Value $QuickStartTxt -Encoding UTF8
 

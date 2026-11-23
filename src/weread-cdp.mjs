@@ -19,6 +19,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DATA_DIR = path.resolve(__dirname, "..", "data");
 export const WEREAD_PROFILE_DIR = path.join(DATA_DIR, "weread-profile");
 export const WEREAD_ACCOUNTS_PATH = path.join(DATA_DIR, "weread-accounts.json");
+export const WEREAD_QUOTA_PATH = path.join(DATA_DIR, "weread-daily-quota.json");
+export const DEFAULT_DAILY_WEREAD_LIMIT = 1200;
 export const WEREAD_CDP_PORT = Number(process.env.WEREAD_CDP_PORT || 9223);
 export const WEREAD_ORIGIN = "https://weread.qq.com";
 
@@ -1396,4 +1398,67 @@ export async function saveWeReadAccount(record) {
     updatedAt: new Date().toISOString(),
   });
   await fs.writeFile(WEREAD_ACCOUNTS_PATH, JSON.stringify([...map.values()], null, 2) + "\n", "utf8");
+}
+
+function getTodayShanghaiDate() {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+/**
+ * Read today's WeRead content fetch counter (auto-resets at 00:00 UTC+8).
+ * On first check of a day, reconciles against today's WeRead-fetched count in index.json if higher.
+ */
+export async function getDailyWeReadQuota(outputDir = "") {
+  const today = getTodayShanghaiDate();
+  let state = { date: today, contentFetches: 0, updatedAt: "" };
+  try {
+    const raw = await fs.readFile(WEREAD_QUOTA_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.date === today) {
+      state.contentFetches = Math.max(0, Number(parsed.contentFetches) || 0);
+      state.updatedAt = parsed.updatedAt || "";
+    }
+  } catch {}
+
+  if (outputDir) {
+    try {
+      const idxRaw = await fs.readFile(path.join(path.resolve(outputDir), "index.json"), "utf8");
+      const idx = JSON.parse(idxRaw);
+      let fetchedToday = 0;
+      for (const a of idx?.articles || []) {
+        if (a.source_channel === "weread" && String(a.fetched_at || "").startsWith(today)) {
+          fetchedToday++;
+        }
+      }
+      if (fetchedToday > state.contentFetches) {
+        state.contentFetches = fetchedToday;
+      }
+    } catch {}
+  }
+
+  return {
+    date: today,
+    contentFetches: state.contentFetches,
+    defaultLimit: DEFAULT_DAILY_WEREAD_LIMIT,
+    recommendedMax: 1500,
+    updatedAt: state.updatedAt,
+  };
+}
+
+export async function incrementDailyWeReadQuota(delta = 1, outputDir = "") {
+  const cur = await getDailyWeReadQuota(outputDir);
+  const next = {
+    date: cur.date,
+    contentFetches: cur.contentFetches + Math.max(0, Number(delta) || 0),
+    updatedAt: new Date().toISOString(),
+  };
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(WEREAD_QUOTA_PATH, JSON.stringify(next, null, 2) + "\n", "utf8");
+  return {
+    ...next,
+    defaultLimit: DEFAULT_DAILY_WEREAD_LIMIT,
+    recommendedMax: 1500,
+  };
 }

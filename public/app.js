@@ -130,6 +130,7 @@ function collectOptions() {
     discoverRelated: $("optDiscoverRelated").checked,
     onlyOriginal: $("optOnlyOriginal").checked,
     delaySec: Number($("optDelaySec").value || 3),
+    dailyLimit: Math.max(0, Number($("optDailyLimit")?.value ?? 1200)),
     minReads: Math.max(0, Number($("optMinReads").value || 0)),
     startPage: Math.max(1, Number($("optStartPage").value || 1)),
     minWords: Math.max(0, Number($("optMinWords").value || 0)),
@@ -162,6 +163,25 @@ function formatShortTime(isoStr) {
   if (Number.isNaN(d.getTime())) return String(isoStr).slice(0, 16);
   const pad = (n) => String(n).padStart(2, "0");
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function renderDailyQuota(q) {
+  const el = $("dailyQuotaBadge");
+  if (!el || !q) return;
+  const used = Number(q.contentFetches || 0);
+  const limit = Math.max(0, Number($("optDailyLimit")?.value ?? q.defaultLimit ?? 1200));
+  el.classList.remove("quota-warn", "quota-over");
+  if (limit > 0) {
+    el.textContent = `今日拉取：${used} / ${limit} 篇（建议每日 ≤ 1200~1500 防 -2041 风控）`;
+    if (used >= limit) {
+      el.classList.add("quota-over");
+    } else if (used >= Math.floor(limit * 0.8)) {
+      el.classList.add("quota-warn");
+    }
+  } else {
+    el.textContent = `今日拉取：${used} 篇（未设上限 · 建议每日 ≤ 1500 防 -2041 风控）`;
+    if (used >= 1200) el.classList.add("quota-warn");
+  }
 }
 
 function renderSubscriptionSummary(sum) {
@@ -453,6 +473,8 @@ async function refreshState(printBootLog = false) {
     renderWeReadStatus(data.wereadStatus);
     renderSavedAccounts();
     renderSubscriptionSummary(data.subscriptionSummary);
+    state.dailyQuota = data.dailyQuota || null;
+    renderDailyQuota(data.dailyQuota);
 
     // Update Account filter dropdown
     const sel = $("filterAccount");
@@ -1301,6 +1323,7 @@ function bindEvents() {
   const savedDark = localStorage.getItem("wxclean_dark_mode") === "1";
   applyDarkMode(savedDark);
   $("optDarkMode").addEventListener("change", (e) => applyDarkMode(e.target.checked));
+  $("optDailyLimit")?.addEventListener("input", () => renderDailyQuota(state.dailyQuota));
 
   // Channel init & switcher
   const savedChannel = localStorage.getItem("wxclean_channel") || "weread";

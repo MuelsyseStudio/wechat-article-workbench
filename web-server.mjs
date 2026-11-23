@@ -22,6 +22,8 @@ import {
 } from "./src/pipeline.mjs";
 import { SERVER_INFO, handleJsonRpcMessage } from "./src/mcp-core.mjs";
 import {
+  DEFAULT_DAILY_WEREAD_LIMIT,
+  getDailyWeReadQuota,
   getWeReadStatus,
   loadSavedWeReadAccounts,
   openWeReadLoginWindow,
@@ -343,6 +345,7 @@ const server = http.createServer(async (req, res) => {
       const wereadStatus = await getWeReadStatus({ probeApi: false });
       const savedWeReadAccounts = await loadSavedWeReadAccounts(idx.outputDir);
       const subsData = await loadSubscriptions({ outputDir: idx.outputDir });
+      const dailyQuota = await getDailyWeReadQuota(idx.outputDir);
       sendJson(res, 200, {
         server: SERVER_INFO,
         port: PORT,
@@ -356,6 +359,7 @@ const server = http.createServer(async (req, res) => {
         localDirSuggestions: localDirs,
         wereadStatus,
         savedWeReadAccounts,
+        dailyQuota,
         subscriptionSummary: {
           total: subsData.accounts.length,
           enabledCount: subsData.accounts.filter((a) => a.enabled).length,
@@ -603,6 +607,10 @@ const server = http.createServer(async (req, res) => {
         dateTo: body.dateTo || "",
         minReads: Math.max(0, Number(body.minReads) || 0),
         minWords: Math.max(0, Number(body.minWords) || 0),
+        dailyLimit:
+          body.dailyLimit !== undefined && body.dailyLimit !== null && body.dailyLimit !== ""
+            ? Math.max(0, Number(body.dailyLimit))
+            : DEFAULT_DAILY_WEREAD_LIMIT,
         onlyOriginal: Boolean(body.onlyOriginal),
         maxArticles: Math.max(1, Number(body.maxArticles) || 200),
         maxPages: Math.max(1, Number(body.maxPages) || 50),

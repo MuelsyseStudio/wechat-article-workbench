@@ -47,6 +47,7 @@ function printHelp() {
   --from <YYYY-MM-DD>  仅保留该日期及之后的文章（sub-add 时作为起始追踪日期）
   --to <YYYY-MM-DD>    仅保留该日期及之前的文章
   --delay <ms>         批量抓取间隔毫秒数（默认: 3000）
+  --daily-limit <n>    微信读书单日安全上限篇数（默认: 1200，建议 ≤1500 防 -2041 风控；0 为不限）
   --max <n>            单次最多抓取篇数（默认: 200）
   --category <分组>    订阅分组名（sub-add 子命令，默认: 默认分组）
   --book-id <bookId>   仅检查单个订阅公众号（sub-sync 子命令）
@@ -74,6 +75,7 @@ function parseArgs(argv) {
     from: "",
     to: "",
     delay: 2500,
+    dailyLimit: 1200,
     max: 200,
     maxPages: 50,
     startPage: 1,
@@ -100,6 +102,7 @@ function parseArgs(argv) {
     else if (a === "--from" && argv[i + 1]) opts.from = argv[++i];
     else if (a === "--to" && argv[i + 1]) opts.to = argv[++i];
     else if (a === "--delay" && argv[i + 1]) opts.delay = Number(argv[++i]);
+    else if (a === "--daily-limit" && argv[i + 1]) opts.dailyLimit = Number(argv[++i]);
     else if (a === "--max" && argv[i + 1]) opts.max = Number(argv[++i]);
     else if (a === "--max-pages" && argv[i + 1]) opts.maxPages = Number(argv[++i]);
     else if (a === "--start-page" && argv[i + 1]) opts.startPage = Number(argv[++i]);
@@ -241,6 +244,7 @@ async function main() {
       maxPages: opts.maxPages,
       startPage: opts.startPage,
       delayMs: opts.delay,
+      dailyLimit: opts.dailyLimit,
       downloadImages: opts.downloadImages,
       force: opts.force,
       extraTags: opts.tags,
@@ -312,6 +316,7 @@ async function main() {
       bookId: opts.bookId,
       trigger: "cli",
       delayMs: opts.delay,
+      dailyLimit: opts.dailyLimit,
       downloadImages: opts.downloadImages,
       saveJsonl: opts.jsonl,
       onProgress: progressLogger,

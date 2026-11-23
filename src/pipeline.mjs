@@ -25,9 +25,12 @@ import {
   politeDelay,
 } from "./fetcher.mjs";
 import {
+  DEFAULT_DAILY_WEREAD_LIMIT,
   WeReadSession,
   bizToWeReadBookId,
   extractWeReadIdentifiersFromText,
+  getDailyWeReadQuota,
+  incrementDailyWeReadQuota,
   loadSavedWeReadAccounts,
   parseWeReadArticlesResponse,
   politeDelayAbortable,
@@ -1397,6 +1400,7 @@ export async function syncWeReadAccounts(
     saveHtml = false,
     saveJson = false,
     saveJsonl = false,
+    dailyLimit = DEFAULT_DAILY_WEREAD_LIMIT,
     prefetchedItems = null,
     signal = null,
     onProgress = null,
@@ -1404,6 +1408,32 @@ export async function syncWeReadAccounts(
 ) {
   const store = new ArticleIndexStore(outputDir);
   await store.load();
+
+  const effectiveDailyLimit = Math.max(0, Number(dailyLimit ?? DEFAULT_DAILY_WEREAD_LIMIT));
+  let quotaState = await getDailyWeReadQuota(store.outputDir);
+  let warnedQuotaNear = false;
+
+  if (effectiveDailyLimit > 0 && quotaState.contentFetches >= effectiveDailyLimit) {
+    const stopReason = `今日微信读书正文拉取已达单日安全上限（${quotaState.contentFetches}/${effectiveDailyLimit} 篇），已自动停止以防触发 -2041 安全校验/封控。建议明天再继续（单日建议不超过 1200~1500 篇；如需调整可修改「每日安全上限」）。`;
+    if (onProgress) {
+      onProgress({ phase: "weread_warn", message: `⛔ ${stopReason}` });
+    }
+    return {
+      channel: "weread",
+      outputDir: store.outputDir,
+      indexFile: store.indexMdPath,
+      totalInputs: 0,
+      saved: 0,
+      updated: 0,
+      skipped: 0,
+      filteredOut: 0,
+      errors: 0,
+      stoppedEarly: true,
+      stopReason,
+      dailyQuota: quotaState,
+      items: [],
+    };
+  }
 
   const session = new WeReadSession();
   try {
@@ -1616,7 +1646,29 @@ export async function syncWeReadAccounts(
         }
       }
 
+      // Enforce daily safe quota before making each actual /web/mp/content network request
+      if (effectiveDailyLimit > 0) {
+        if (quotaState.contentFetches >= effectiveDailyLimit) {
+          summary.stoppedEarly = true;
+          summary.stopReason = `今日微信读书正文拉取已达单日安全上限（${quotaState.contentFetches}/${effectiveDailyLimit} 篇），已自动停机保护账号并保存已完成归档。建议明天再继续（单日建议不超过 1200~1500 篇）。`;
+          if (onProgress) {
+            onProgress({ phase: "weread_warn", message: `⛔ ${summary.stopReason}` });
+          }
+          break;
+        }
+        if (!warnedQuotaNear && quotaState.contentFetches >= Math.floor(effectiveDailyLimit * 0.8)) {
+          warnedQuotaNear = true;
+          if (onProgress) {
+            onProgress({
+              phase: "weread_warn",
+              message: `⚠️ 安全提醒：今日已拉取 ${quotaState.contentFetches}/${effectiveDailyLimit} 篇，接近单日安全上限（单日超过约 1500 篇极易触发 -2041 校验）。`,
+            });
+          }
+        }
+      }
+
       fetchedContentCount++;
+      quotaState = await incrementDailyWeReadQuota(1, store.outputDir);
       try {
         let contentRes = await session.fetchContentHtml(item.reviewId);
         if (contentRes.sessionRenewed && onProgress) {
