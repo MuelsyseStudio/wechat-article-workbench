@@ -563,36 +563,104 @@ export class WeReadSession {
     return { connected: true, launchedNow: boot.launchedNow, browserName: boot.browserName || "" };
   }
 
-  async checkLogin({ probeApi = false } = {}) {
+  async readCookieSummary() {
     if (!this.cdp || this.cdp.closed) {
-      return { browserRunning: false, loggedIn: false, vid: "", userName: "", expired: false };
+      return { vid: "", skey: "", skeyExpires: 0, rt: "", userName: "" };
     }
     const cookieRes = await this.cdp
       .send("Network.getCookies", { urls: [WEREAD_ORIGIN] }, 8000)
       .catch(() => ({ cookies: [] }));
     const cookies = Array.isArray(cookieRes?.cookies) ? cookieRes.cookies : [];
-    const map = new Map(cookies.map((c) => [c.name, c.value]));
-    const vid = String(map.get("wr_vid") || "").trim();
-    const skey = String(map.get("wr_skey") || "").trim();
+    const byName = new Map(cookies.map((c) => [c.name, c]));
+    const vid = String(byName.get("wr_vid")?.value || "").trim();
+    const skeyCookie = byName.get("wr_skey");
+    const skey = String(skeyCookie?.value || "").trim();
+    const skeyExpires = Number(skeyCookie?.expires || 0);
+    const rt = String(byName.get("wr_rt")?.value || "").trim();
     let userName = "";
-    if (map.get("wr_name")) {
+    const rawName = byName.get("wr_name")?.value;
+    if (rawName) {
       try {
-        userName = decodeURIComponent(map.get("wr_name"));
+        userName = decodeURIComponent(rawName);
       } catch {
-        userName = String(map.get("wr_name"));
+        userName = String(rawName);
       }
     }
+    return { vid, skey, skeyExpires, rt, userName };
+  }
 
+  /**
+   * Silently refresh WeRead's short-lived wr_skey (~2h TTL) using the long-lived wr_rt refresh cookie
+   * simply by reloading the weread.qq.com page (identical to pressing F5 in Edge).
+   * Requires NO QR rescan whenever wr_rt is still valid.
+   */
+  async trySilentRenewSession() {
+    if (!this.cdp || this.cdp.closed) return { renewed: false };
+    const nowMs = Date.now();
+    if (this._lastRenewAt && nowMs - this._lastRenewAt < 4000) {
+      const cur = await this.readCookieSummary();
+      return { renewed: Boolean(cur.vid && cur.skey), ...cur };
+    }
+    this._lastRenewAt = nowMs;
+
+    try {
+      const href = await this.cdp
+        .evaluate("String(location.href || '')", { awaitPromise: false, timeoutMs: 4000 })
+        .catch(() => "");
+      if (href.startsWith(WEREAD_ORIGIN)) {
+        await this.cdp.send("Page.reload", { ignoreCache: false }, 15000).catch(() => {});
+      } else {
+        await this.cdp.send("Page.navigate", { url: `${WEREAD_ORIGIN}/` }, 15000).catch(() => {});
+      }
+
+      const deadline = Date.now() + 9000;
+      let latest = { vid: "", skey: "", skeyExpires: 0, rt: "", userName: "" };
+      while (Date.now() < deadline) {
+        await abortableSleep(450);
+        const ready = await this.cdp
+          .evaluate("String(document.readyState || '')", { awaitPromise: false, timeoutMs: 3000 })
+          .catch(() => "");
+        latest = await this.readCookieSummary();
+        const nowSec = Date.now() / 1000;
+        const skeyFresh = Boolean(latest.skey) && (latest.skeyExpires <= 0 || latest.skeyExpires > nowSec + 60);
+        if (ready === "complete" && latest.vid && skeyFresh) {
+          return { renewed: true, ...latest };
+        }
+      }
+      return { renewed: Boolean(latest.vid && latest.skey), ...latest };
+    } catch {
+      return { renewed: false };
+    }
+  }
+
+  async checkLogin({ probeApi = false, autoRenew = true } = {}) {
+    if (!this.cdp || this.cdp.closed) {
+      return { browserRunning: false, loggedIn: false, vid: "", userName: "", expired: false };
+    }
+
+    let c = await this.readCookieSummary();
+    let didRenew = false;
+    const nowSec = Date.now() / 1000;
+    const skeyMissingOrExpiring = !c.skey || (c.skeyExpires > 0 && c.skeyExpires - nowSec < 300);
+
+    // If long-lived wr_rt is present while short-lived wr_skey expired/missing, silently renew via page reload!
+    if (autoRenew && c.vid && c.rt && skeyMissingOrExpiring) {
+      await this.trySilentRenewSession();
+      didRenew = true;
+      c = await this.readCookieSummary();
+    }
+
+    let { vid, skey, rt, userName } = c;
     if (!vid || !skey) {
-      return { browserRunning: true, loggedIn: false, vid, userName, expired: false };
+      return { browserRunning: true, loggedIn: false, vid, userName, expired: Boolean(vid) };
     }
 
     if (probeApi) {
-      try {
-        const probe = await this.cdp.evaluate(
+      const runUserProbe = async (targetVid) =>
+        await this.cdp.evaluate(
           `(async () => {
             try {
-              const res = await fetch('/web/user?userVid=' + encodeURIComponent(${JSON.stringify(vid)}), {
+              const res = await fetch('/web/user?userVid=' + encodeURIComponent(${JSON.stringify(targetVid)}), {
                 credentials: 'include'
               });
               const data = await res.json().catch(() => null);
@@ -603,7 +671,23 @@ export class WeReadSession {
           })()`,
           { awaitPromise: true, timeoutMs: 12000 }
         );
-        if (probe?.data?.errCode === -2012 || probe?.data?.errCode === -2010 || probe?.status === 401) {
+
+      try {
+        let probe = await runUserProbe(vid);
+        const isExpiredErr = (p) =>
+          p?.data?.errCode === -2012 || p?.data?.errCode === -2010 || p?.status === 401;
+
+        if (isExpiredErr(probe) && autoRenew && rt && !didRenew) {
+          const renewed = await this.trySilentRenewSession();
+          didRenew = true;
+          if (renewed.renewed && renewed.vid) {
+            vid = renewed.vid;
+            if (renewed.userName) userName = renewed.userName;
+            probe = await runUserProbe(vid);
+          }
+        }
+
+        if (isExpiredErr(probe)) {
           return {
             browserRunning: true,
             loggedIn: false,
@@ -623,6 +707,7 @@ export class WeReadSession {
     return {
       browserRunning: true,
       loggedIn: true,
+      renewed: didRenew,
       vid,
       userName,
       expired: false,
@@ -631,8 +716,9 @@ export class WeReadSession {
 
   /**
    * Call GET https://weread.qq.com/web/mp/articles?bookId=...&offset=...
+   * Automatically renews wr_skey via wr_rt once if -2012/-2010/401 occurs mid-session.
    */
-  async fetchArticlesPage(bookId, offset = 0) {
+  async fetchArticlesPage(bookId, offset = 0, { allowRenew = true } = {}) {
     if (!this.cdp || this.cdp.closed) {
       throw new Error("微信读书浏览器连接已断开，请重新点击「登录微信读书」");
     }
@@ -680,6 +766,14 @@ export class WeReadSession {
       };
     }
     if (data.errCode) {
+      const code = Number(data.errCode);
+      if (allowRenew && (code === -2012 || code === -2010)) {
+        const renewed = await this.trySilentRenewSession();
+        if (renewed.renewed) {
+          const retry = await this.fetchArticlesPage(bookId, offset, { allowRenew: false });
+          return { ...retry, sessionRenewed: true };
+        }
+      }
       return {
         ok: false,
         status: result.status,
@@ -689,6 +783,13 @@ export class WeReadSession {
       };
     }
     if (!result.ok) {
+      if (allowRenew && result.status === 401) {
+        const renewed = await this.trySilentRenewSession();
+        if (renewed.renewed) {
+          const retry = await this.fetchArticlesPage(bookId, offset, { allowRenew: false });
+          return { ...retry, sessionRenewed: true };
+        }
+      }
       return {
         ok: false,
         status: result.status,
@@ -701,8 +802,9 @@ export class WeReadSession {
 
   /**
    * Call GET https://weread.qq.com/web/mp/content?reviewId=...
+   * Automatically renews wr_skey via wr_rt once if -2012/-2010/401 occurs during a long batch.
    */
-  async fetchContentHtml(reviewId) {
+  async fetchContentHtml(reviewId, { allowRenew = true } = {}) {
     if (!this.cdp || this.cdp.closed) {
       throw new Error("微信读书浏览器连接已断开");
     }
@@ -733,6 +835,14 @@ export class WeReadSession {
       try {
         const parsed = JSON.parse(trimmed);
         if (parsed && parsed.errCode) {
+          const code = Number(parsed.errCode);
+          if (allowRenew && (code === -2012 || code === -2010)) {
+            const renewed = await this.trySilentRenewSession();
+            if (renewed.renewed) {
+              const retry = await this.fetchContentHtml(reviewId, { allowRenew: false });
+              return { ...retry, sessionRenewed: true };
+            }
+          }
           return {
             ok: false,
             status: result.status,
@@ -744,6 +854,13 @@ export class WeReadSession {
     }
 
     if (!result.ok) {
+      if (allowRenew && result.status === 401) {
+        const renewed = await this.trySilentRenewSession();
+        if (renewed.renewed) {
+          const retry = await this.fetchContentHtml(reviewId, { allowRenew: false });
+          return { ...retry, sessionRenewed: true };
+        }
+      }
       return {
         ok: false,
         status: result.status,
@@ -847,6 +964,17 @@ export class WeReadSession {
    */
   async openQrDialogAndCapture({ forceRefresh = false } = {}) {
     if (!this.cdp || this.cdp.closed) return { ok: false, reason: "not_connected" };
+
+    // If tab is stuck on a sub-route (e.g. /web/shelf after session expiry), navigate back to root homepage
+    // so WeRead's login link (.wr_index_page_top_section_header_action_link) is present.
+    const curPath = await this.cdp
+      .evaluate("String(location.pathname || '/')", { awaitPromise: false, timeoutMs: 4000 })
+      .catch(() => "/");
+    if (curPath !== "/") {
+      await this.cdp.send("Page.navigate", { url: `${WEREAD_ORIGIN}/` }, 15000).catch(() => {});
+      await abortableSleep(600);
+    }
+
     // Ensure page finished initial hydration
     const readyDeadline = Date.now() + 8000;
     while (Date.now() < readyDeadline) {
@@ -1087,7 +1215,7 @@ export async function getWeReadStatus({ probeApi = false, port = WEREAD_CDP_PORT
         expired: false,
       };
     }
-    const login = await session.checkLogin({ probeApi });
+    const login = await session.checkLogin({ probeApi, autoRenew: true });
     return {
       browserAvailable: Boolean(executablePath),
       browserName,
@@ -1123,7 +1251,7 @@ export async function openWeReadLoginWindow({ port = WEREAD_CDP_PORT, includeQr 
   const session = new WeReadSession({ port });
   try {
     const conn = await session.connect({ autoLaunch: true, bringToFront: true });
-    const login = await session.checkLogin({ probeApi: true });
+    const login = await session.checkLogin({ probeApi: true, autoRenew: true });
     const { browserName } = findChromiumExecutable();
 
     let qrImageDataUrl = "";

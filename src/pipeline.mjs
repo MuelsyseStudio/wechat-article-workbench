@@ -1616,6 +1616,12 @@ export async function syncWeReadAccounts(
       fetchedContentCount++;
       try {
         let contentRes = await session.fetchContentHtml(item.reviewId);
+        if (contentRes.sessionRenewed && onProgress) {
+          onProgress({
+            phase: "weread_resolve",
+            message: "🔄 检测到微信读书短期会话凭证（wr_skey）满 2 小时到期，已自动无感续期并无缝继续抓取",
+          });
+        }
         // Single gentle retry on transient network disconnect before counting as failure
         if (!contentRes.ok && contentRes.status === 0 && /Failed to fetch|network|closed/i.test(contentRes.errMsg || "")) {
           await politeDelayAbortable(Math.max(delayMs * 2, 6000), signal);
