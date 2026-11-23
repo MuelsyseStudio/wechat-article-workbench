@@ -1506,6 +1506,7 @@ export async function syncWeReadAccounts(
     let metadataEnrichedCount = 0;
     let emptyRecordedCount = 0;
     let consecutiveNetErrors = 0;
+    let consecutiveRateLimits = 0;
 
     for (let i = 0; i < candidates.length; i++) {
       if (signal?.aborted) {
@@ -1622,8 +1623,20 @@ export async function syncWeReadAccounts(
             message: "🔄 检测到微信读书短期会话凭证（wr_skey）满 2 小时到期，已自动无感续期并无缝继续抓取",
           });
         }
-        // Single gentle retry on transient network disconnect before counting as failure
-        if (!contentRes.ok && contentRes.status === 0 && /Failed to fetch|network|closed/i.test(contentRes.errMsg || "")) {
+        // Single gentle retry on transient network disconnect OR intermittent soft rate limit ("操作频繁，请稍后再试")
+        if (!contentRes.ok && contentRes.softRateLimit) {
+          const coolMs = Math.max(delayMs * 3, 12000);
+          if (onProgress) {
+            onProgress({
+              phase: "weread_warn",
+              message: `[${i + 1}/${candidates.length}] ⏳ 遇微信读书「操作频繁，请稍后再试」，自动冷却 ${Math.round(coolMs / 1000)} 秒后重试本篇...`,
+            });
+          }
+          await politeDelayAbortable(coolMs, signal);
+          if (!signal?.aborted) {
+            contentRes = await session.fetchContentHtml(item.reviewId);
+          }
+        } else if (!contentRes.ok && contentRes.status === 0 && /Failed to fetch|network|closed/i.test(contentRes.errMsg || "")) {
           await politeDelayAbortable(Math.max(delayMs * 2, 6000), signal);
           if (!signal?.aborted) {
             contentRes = await session.fetchContentHtml(item.reviewId);
@@ -1634,24 +1647,23 @@ export async function syncWeReadAccounts(
           const code = Number(contentRes.errCode || 0);
           const isNetDrop =
             contentRes.status === 0 && /Failed to fetch|network|closed|timeout|断开/i.test(contentRes.errMsg || "");
-          const isAuthOrRateLimit =
-            code === -2012 ||
-            code === -2010 ||
-            code === -2013 ||
-            code === 401 ||
-            code === 403 ||
-            code === 429 ||
-            /限速|频繁|过期|登录/.test(contentRes.errMsg || "");
+          const isSoftRateLimit = Boolean(contentRes.softRateLimit);
+          const isAuthExpired =
+            code === -2012 || code === -2010 || code === 401 || /过期|登录超时/.test(contentRes.errMsg || "");
+          const isHardRateLimit =
+            !isSoftRateLimit && (code === -2013 || code === 403 || code === 429 || /限速/.test(contentRes.errMsg || ""));
 
-          if (isNetDrop) {
-            consecutiveNetErrors++;
-          } else {
-            consecutiveNetErrors = 0;
-          }
+          if (isNetDrop) consecutiveNetErrors++;
+          else consecutiveNetErrors = 0;
 
-          if (isAuthOrRateLimit || consecutiveNetErrors >= 3) {
+          if (isSoftRateLimit) consecutiveRateLimits++;
+          else consecutiveRateLimits = 0;
+
+          if (isAuthExpired || isHardRateLimit || consecutiveNetErrors >= 3 || consecutiveRateLimits >= 3) {
             summary.stoppedEarly = true;
-            summary.stopReason = isAuthOrRateLimit
+            summary.stopReason = isSoftRateLimit
+              ? "连续 3 篇重试后仍触发微信读书「操作频繁，请稍后再试」，已自动熔断保护并保存全部已完成归档。建议将等待时间调至 5~6 秒，或稍候 3~5 分钟后继续。"
+              : isAuthExpired || isHardRateLimit
               ? contentRes.errMsg || "微信读书接口返回异常，已安全停止"
               : "连续 3 次网络断连（ERR_CONNECTION_CLOSED），判定触发微信读书频控限速，已自动熔断并保存已完成归档。请稍候 5~15 分钟后再次点击「2.批量下载清洗」，已归档篇目会自动去重跳过。";
             summary.errors++;
@@ -1660,7 +1672,11 @@ export async function syncWeReadAccounts(
               url: item.url,
               status: "blocked",
               title: item.title,
-              reason: isNetDrop ? "weread_connection_closed" : `weread_err_${code}`,
+              reason: isSoftRateLimit
+                ? "weread_soft_rate_limit"
+                : isNetDrop
+                ? "weread_connection_closed"
+                : `weread_err_${code}`,
               message: summary.stopReason,
             });
             if (onProgress) {
@@ -1676,11 +1692,11 @@ export async function syncWeReadAccounts(
             break;
           }
 
-          // Record confirmed WeRead empty content (HTTP 200 with empty payload, errCode === -2) so future runs skip it
-          if (code === -2 && contentRes.status === 200) {
+          // Record confirmed WeRead empty content (errCode -2) or deleted article (errCode -3) so future runs skip it
+          if ((code === -2 || code === -3) && contentRes.status === 200) {
             store.recordKnownEmpty({
               ...probeMeta,
-              reason: "empty_body",
+              reason: code === -3 ? "article_deleted" : "empty_body",
               message: contentRes.errMsg || "微信读书返回的正文为空",
             });
             emptyRecordedCount++;
@@ -1692,7 +1708,14 @@ export async function syncWeReadAccounts(
             url: item.url,
             status: "error",
             title: item.title,
-            reason: code === -2 ? "empty_body" : `weread_err_${code}`,
+            reason:
+              code === -2
+                ? "empty_body"
+                : code === -3
+                ? "article_deleted"
+                : isSoftRateLimit
+                ? "weread_soft_rate_limit"
+                : `weread_err_${code}`,
             message: contentRes.errMsg || "正文获取失败",
           });
           if (onProgress) {
@@ -1702,9 +1725,9 @@ export async function syncWeReadAccounts(
               url: item.url,
               status: "error",
               title: item.title,
-              reason: code === -2 ? "empty_body" : "",
+              reason: code === -2 ? "empty_body" : code === -3 ? "article_deleted" : "",
               message:
-                code === -2
+                code === -2 || code === -3
                   ? `${contentRes.errMsg || "正文为空"}（已记入空文跳过名单，下次自动跳过）`
                   : contentRes.errMsg || "正文获取失败",
             });
@@ -1713,6 +1736,7 @@ export async function syncWeReadAccounts(
         }
 
         consecutiveNetErrors = 0;
+        consecutiveRateLimits = 0;
 
         const html = contentRes.html;
         const htmlMeta = extractWechatMetadata(html, { sourceUrl: item.url || "" });

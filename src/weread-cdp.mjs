@@ -11,7 +11,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { formatShanghaiDateTime } from "./html-to-md.mjs";
+import { detectWeReadSoftError, formatShanghaiDateTime } from "./html-to-md.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -871,6 +871,29 @@ export class WeReadSession {
 
     if (!trimmed || trimmed.length < 20) {
       return { ok: false, status: result.status, errCode: -2, errMsg: "微信读书返回的正文为空" };
+    }
+
+    // Catch HTTP 200 soft rate-limit / deleted error HTML (e.g. "操作频繁，请稍后再试。")
+    const softErr = detectWeReadSoftError(result.text);
+    if (softErr.isError) {
+      if (softErr.kind === "rate_limit") {
+        return {
+          ok: false,
+          status: 429,
+          errCode: -2013,
+          softRateLimit: true,
+          errMsg: softErr.message,
+        };
+      }
+      if (softErr.kind === "deleted") {
+        return {
+          ok: false,
+          status: 200,
+          errCode: -3,
+          deleted: true,
+          errMsg: softErr.message,
+        };
+      }
     }
 
     return { ok: true, status: result.status, html: result.text };

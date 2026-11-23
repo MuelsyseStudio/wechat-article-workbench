@@ -196,8 +196,9 @@ export class ArticleIndexStore {
    * 2) body content_sha256
    * 3) normalized (account + date + title)
    */
-  findDuplicate({ meta, contentHash }) {
+  findDuplicate({ meta, contentHash, wordCount = 0 }) {
     const titleKey = normalizeTitleKey(meta.account, meta.date, meta.title);
+    const normAcc = String(meta.account || "").trim().toLowerCase();
     for (const item of this.data.articles) {
       if (meta.reviewId && item.review_id && item.review_id === meta.reviewId) {
         return { duplicate: true, reason: "review_id", existing: item };
@@ -209,7 +210,14 @@ export class ArticleIndexStore {
         return { duplicate: true, reason: "source_url", existing: item };
       }
       if (contentHash && item.content_sha256 && item.content_sha256 === contentHash) {
-        return { duplicate: true, reason: "content_sha256", existing: item };
+        // Guard against short boilerplate collisions & cross-account false positives:
+        // Only deduplicate by content_sha256 when body is substantial (>=100 chars) and belongs to the same account.
+        const itemAcc = String(item.account || "").trim().toLowerCase();
+        const sameAccount = !normAcc || !itemAcc || normAcc === itemAcc;
+        const substantial = (wordCount >= 100 || (item.word_count || 0) >= 100) && (item.word_count || 0) >= 80;
+        if (sameAccount && substantial) {
+          return { duplicate: true, reason: "content_sha256", existing: item };
+        }
       }
       if (meta.date && meta.title && item.title_key && item.title_key === titleKey) {
         return { duplicate: true, reason: "account_date_title", existing: item };
@@ -340,7 +348,8 @@ export class ArticleIndexStore {
     saveJson = false,
   }) {
     const contentHash = sha256(body.trim());
-    const dup = this.findDuplicate({ meta, contentHash });
+    const bodyWordCount = body.replace(/\s+/g, "").length;
+    const dup = this.findDuplicate({ meta, contentHash, wordCount: bodyWordCount });
     if (dup.duplicate && !force) {
       return {
         status: "skipped",

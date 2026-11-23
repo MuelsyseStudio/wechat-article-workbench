@@ -761,18 +761,23 @@ export function extractWechatBodyHtml(html) {
 
 /**
  * Extract article body HTML from WeRead /web/mp/content HTML response.
- * Prefers #js_content / #js_image_desc, falls back to <body> or raw HTML fragment.
+ * Prefers #js_content / #js_image_desc. If #js_content exists in the full WeChat page
+ * but is genuinely empty (e.g. video/audio card without text/images), returns "" instead of
+ * falling back to <body> page chrome (title/author/novel-banner).
  */
 export function extractWeReadBodyHtml(html) {
   if (!html) return "";
   const standard = extractWechatBodyHtml(html);
-  if (standard && cleanTextInline(standard).length > 0) {
+  if (standard && (cleanTextInline(standard).length > 0 || /<img\b/i.test(standard))) {
     return standard;
+  }
+  // If full WeChat HTML has an explicit #js_content container that is empty, don't capture outer header chrome!
+  if (/\bid\s*=\s*["']js_content["']/i.test(html)) {
+    return "";
   }
   const bodyMatch = html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i);
   if (bodyMatch && bodyMatch[1]) {
     let inner = bodyMatch[1];
-    // Strip possible WeRead title/meta wrappers if separate from body
     inner = inner.replace(/<(script|style|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
     if (cleanTextInline(inner).length > 0 || /<img\b/i.test(inner)) {
       return inner.trim();
@@ -783,6 +788,51 @@ export function extractWeReadBodyHtml(html) {
     return stripped;
   }
   return "";
+}
+
+/**
+ * Detect soft rate-limit, auth-expired, or deleted/unavailable placeholder pages returned as HTTP 200 HTML
+ * (e.g. WeRead returning "操作频繁，请稍后再试。" inside a normal 200 HTML shell).
+ */
+export function detectWeReadSoftError(html, extractedBodyText = "") {
+  const plain = cleanTextInline(extractedBodyText || String(html || "").replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ""));
+  if (!plain) return { isError: false };
+
+  // Only treat as error page when there is no full article body (short text or no #js_content)
+  const hasJsContent = /\bid\s*=\s*["']js_content["']/i.test(String(html || ""));
+  const isShort = plain.length <= 160;
+
+  if (
+    (isShort || !hasJsContent) &&
+    /操作频繁|操作过于频繁|请求过于频繁|访问过于频繁|系统繁忙，请稍后再试|请稍后再试。?$/.test(plain)
+  ) {
+    return {
+      isError: true,
+      kind: "rate_limit",
+      message: `微信读书返回频控提示（${plain.slice(0, 40)}）`,
+    };
+  }
+  if (
+    (isShort || !hasJsContent) &&
+    /环境异常|完成验证后即可继续访问|去验证|secitptpage\/verify/.test(plain)
+  ) {
+    return {
+      isError: true,
+      kind: "rate_limit",
+      message: "触发安全验证提示（环境异常），已安全保护停止",
+    };
+  }
+  if (
+    (isShort || !hasJsContent) &&
+    /该内容已被发布者删除|此内容因违规无法查看|内容已被删除|该公众号已被屏蔽/.test(plain)
+  ) {
+    return {
+      isError: true,
+      kind: "deleted",
+      message: `该文章已被删除或无法查看（${plain.slice(0, 40)}）`,
+    };
+  }
+  return { isError: false };
 }
 
 /**
