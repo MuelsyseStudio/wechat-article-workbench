@@ -92,6 +92,12 @@ $QuickStartTxt = @"
   .\wxclean.cmd index -q 关键词                检索本地已归档文章
   .\wxclean.cmd --help                         查看全部 CLI 命令
 
+【遇到 -2041 (ErrorNeedVerify) 怎么恢复？】
+1. 先关闭「公众号订阅」里的「定时自动更新」，停止所有请求；
+2. 打开手机「微信读书 App」->「我」->「设置」->「登录管理」，退出旧的网页端设备，并在 App 里正常翻阅几页（如有官方验证请本人手动完成）；
+3. 回到工作台点击「登录微信读书」重新微信扫码获取全新会话即可恢复（后续建议等待 4~6 秒、单日 ≤ 1200 篇）。
+（如需彻底重置本地登录档案，关闭独立 Edge 窗口后删除 data\weread-profile\ 重新扫码即可，不影响已归档文章。）
+
 【温馨提示】
 - 本绿色版已内置官方 Node.js 运行时（runtime\node.exe），无需额外安装任何环境；
 - 需要本机装有 Microsoft Edge（Win10/Win11 默认自带）或 Google Chrome；
