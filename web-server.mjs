@@ -484,8 +484,9 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === "/api/push/send-digest" && req.method === "POST") {
       const body = await readJsonBody(req);
+      const outputDir = body.outputDir || DEFAULT_OUTPUT_DIR;
       const resSend = await runDailyDigestPush({
-        outputDir: body.outputDir || DEFAULT_OUTPUT_DIR,
+        outputDir,
         trigger: "manual",
         hours: body.hours !== undefined ? Number(body.hours) : null,
         accounts: Array.isArray(body.accounts) ? body.accounts : null,
@@ -493,6 +494,16 @@ const server = http.createServer(async (req, res) => {
         channelIds: Array.isArray(body.channelIds) ? body.channelIds : [],
         previewOnly: false,
         skipIfEmpty: false,
+        syncFirst: typeof body.syncFirst === "boolean" ? body.syncFirst : null,
+        onSyncFirst: async () => {
+          if (schedulerRuntime.running) return null;
+          schedulerRuntime.running = true;
+          try {
+            return await runSubscriptionsCheck({ outputDir, trigger: "digest_preflight", skipRealtimePush: true });
+          } finally {
+            schedulerRuntime.running = false;
+          }
+        },
       });
       sendJson(res, resSend.ok ? 200 : 400, resSend);
       return;
@@ -1167,6 +1178,16 @@ server.listen(PORT, HOST, () => {
     checkAndRunScheduledDailyDigest({
       outputDir: DEFAULT_OUTPUT_DIR,
       logger: (msg) => console.log(msg),
+      onSyncFirst: async () => {
+        if (schedulerRuntime.running) return null;
+        schedulerRuntime.running = true;
+        try {
+          console.log("[每日日报调度] 推送前先增量拉取订阅公众号新文章...");
+          return await runSubscriptionsCheck({ outputDir: DEFAULT_OUTPUT_DIR, trigger: "scheduled", skipRealtimePush: true });
+        } finally {
+          schedulerRuntime.running = false;
+        }
+      },
     }).catch((err) => console.error("[每日日报调度异常]", err?.message || err));
   }, 60 * 1000);
   if (AUTO_OPEN) {

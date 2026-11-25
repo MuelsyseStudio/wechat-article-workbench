@@ -53,6 +53,7 @@ function defaultPushConfig() {
     settings: {
       pushOnNewArticles: false,
       dailyDigestEnabled: false,
+      syncBeforeDigest: true,
       dailyDigestTime: "21:00",
       lookbackHours: 24,
       maxArticlesPerDigest: 20,
@@ -140,6 +141,7 @@ export async function loadPushConfig() {
       settings: {
         pushOnNewArticles: Boolean(s.pushOnNewArticles),
         dailyDigestEnabled: Boolean(s.dailyDigestEnabled),
+        syncBeforeDigest: s.syncBeforeDigest !== false,
         dailyDigestTime: timeMatch ? `${timeMatch[1]}:${timeMatch[2]}` : "21:00",
         lookbackHours: Math.max(1, Math.min(168, Number(s.lookbackHours) || 24)),
         maxArticlesPerDigest: Math.max(1, Math.min(50, Number(s.maxArticlesPerDigest) || 20)),
@@ -169,6 +171,7 @@ export async function updatePushSettings(patch = {}) {
   const s = cfg.settings;
   if (typeof patch.pushOnNewArticles === "boolean") s.pushOnNewArticles = patch.pushOnNewArticles;
   if (typeof patch.dailyDigestEnabled === "boolean") s.dailyDigestEnabled = patch.dailyDigestEnabled;
+  if (typeof patch.syncBeforeDigest === "boolean") s.syncBeforeDigest = patch.syncBeforeDigest;
   if (typeof patch.dailyDigestTime === "string" && /^\d{2}:\d{2}$/.test(patch.dailyDigestTime.trim())) {
     s.dailyDigestTime = patch.dailyDigestTime.trim();
   }
@@ -570,8 +573,43 @@ async function sendToWeCom(ch, markdown) {
   return { chunks: chunks.length, message: `已推送 ${chunks.length} 条企微 Markdown 消息` };
 }
 
+/**
+ * Convert standard Markdown into Feishu Interactive Card v1 Markdown subset
+ * (Feishu cards do NOT render `##` headings or `>` blockquotes — they show them literally!).
+ */
+export function toFeishuCardMarkdown(markdown, cardTitle = "") {
+  const lines = String(markdown || "").split(/\r?\n/);
+  const out = [];
+  for (const raw of lines) {
+    const trimmed = raw.trim();
+    // Skip redundant top H2 if it duplicates the card header title
+    if (cardTitle && /^##\s+/.test(trimmed) && trimmed.replace(/^##\s+/, "").trim() === cardTitle.trim()) {
+      continue;
+    }
+    if (/^###\s+(.+)/.test(trimmed)) {
+      const text = trimmed.replace(/^###\s+/, "").trim();
+      if (out.length > 0 && out[out.length - 1] !== "") out.push("");
+      out.push(`**📌 ${text}**`);
+      continue;
+    }
+    if (/^##\s+(.+)/.test(trimmed)) {
+      const text = trimmed.replace(/^##\s+/, "").trim();
+      out.push(`**${text}**`);
+      continue;
+    }
+    if (/^>\s*(.+)/.test(trimmed)) {
+      const text = trimmed.replace(/^>\s*/, "").trim();
+      out.push(`<font color='grey'>${text}</font>`);
+      continue;
+    }
+    out.push(raw);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 async function sendToFeishu(ch, title, markdown) {
-  const chunks = chunkTextByUtf8Bytes(markdown, 15000);
+  const feishuMd = toFeishuCardMarkdown(markdown, title);
+  const chunks = chunkTextByUtf8Bytes(feishuMd, 15000);
   for (let i = 0; i < chunks.length; i++) {
     const cardTitle = chunks.length > 1 ? `${title} (${i + 1}/${chunks.length})` : title;
     const payload = {
@@ -794,9 +832,21 @@ export async function runDailyDigestPush({
   channelIds = [],
   previewOnly = false,
   skipIfEmpty = false,
+  syncFirst = null,
+  onSyncFirst = null,
 } = {}) {
   const cfg = await loadPushConfig();
   const s = cfg.settings;
+
+  // Optionally sync subscriptions first so the digest includes today's freshly published articles
+  let syncResult = null;
+  const shouldSyncFirst = !previewOnly && (syncFirst !== null ? Boolean(syncFirst) : Boolean(s.syncBeforeDigest));
+  if (shouldSyncFirst && typeof onSyncFirst === "function") {
+    try {
+      syncResult = await onSyncFirst();
+    } catch {}
+  }
+
   const digest = await buildArticlesDigest({
     outputDir,
     hours: hours ?? s.lookbackHours,
@@ -831,6 +881,7 @@ export async function runDailyDigestPush({
       reason: "no_new_articles",
       digest,
       digestFile,
+      syncResult,
       sent: 0,
       failed: 0,
       results: [],
@@ -842,7 +893,7 @@ export async function runDailyDigestPush({
     trigger,
     kind: "daily_digest",
   });
-  return { ...pushRes, digest, digestFile };
+  return { ...pushRes, digest, digestFile, syncResult };
 }
 
 /**
@@ -868,7 +919,7 @@ export async function triggerNewArticlesPush(newArticles, { outputDir = DEFAULT_
 /**
  * Check if the scheduled daily digest should fire right now (called every 60s by web-server.mjs).
  */
-export async function checkAndRunScheduledDailyDigest({ outputDir = DEFAULT_OUTPUT_DIR, logger = null } = {}) {
+export async function checkAndRunScheduledDailyDigest({ outputDir = DEFAULT_OUTPUT_DIR, logger = null, onSyncFirst = null } = {}) {
   const cfg = await loadPushConfig();
   if (!cfg.settings.dailyDigestEnabled) return null;
   const enabled = cfg.channels.filter((c) => c.enabled);
@@ -885,6 +936,7 @@ export async function checkAndRunScheduledDailyDigest({ outputDir = DEFAULT_OUTP
     outputDir,
     trigger: "scheduled",
     skipIfEmpty: true,
+    onSyncFirst,
   });
   if (logger) {
     if (res.skipped) {

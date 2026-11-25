@@ -1664,6 +1664,7 @@ async function loadPushConfigTable() {
     const s = cfg.settings || {};
     $("optPushRealtime").checked = Boolean(s.pushOnNewArticles);
     $("optPushDaily").checked = Boolean(s.dailyDigestEnabled);
+    if ($("optPushSyncFirst")) $("optPushSyncFirst").checked = s.syncBeforeDigest !== false;
     $("optPushDailyTime").value = s.dailyDigestTime || "21:00";
     if ([24, 48, 72, 168].includes(Number(s.lookbackHours))) {
       $("optPushHours").value = String(s.lookbackHours);
@@ -1824,6 +1825,7 @@ async function handleSavePushSettings() {
     const payload = {
       pushOnNewArticles: $("optPushRealtime").checked,
       dailyDigestEnabled: $("optPushDaily").checked,
+      syncBeforeDigest: $("optPushSyncFirst") ? $("optPushSyncFirst").checked : true,
       dailyDigestTime: $("optPushDailyTime").value || "21:00",
       lookbackHours: Number($("optPushHours").value || 24),
       excerptChars: Number($("optPushExcerpt").value ?? 160),
@@ -2312,6 +2314,7 @@ function bindEvents() {
   $("tabPush").addEventListener("click", () => switchTab("push"));
   $("optPushRealtime").addEventListener("change", handleSavePushSettings);
   $("optPushDaily").addEventListener("change", handleSavePushSettings);
+  $("optPushSyncFirst")?.addEventListener("change", handleSavePushSettings);
   $("optPushDailyTime").addEventListener("change", handleSavePushSettings);
   $("optPushHours").addEventListener("change", handleSavePushSettings);
   $("optPushExcerpt").addEventListener("change", handleSavePushSettings);

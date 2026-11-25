@@ -338,6 +338,7 @@ export async function runSubscriptionsCheck({
   maxPerAccount = null,
   downloadImages = null,
   saveJsonl = null,
+  skipRealtimePush = false,
   signal = null,
   onProgress = null,
 } = {}) {
@@ -678,7 +679,7 @@ export async function runSubscriptionsCheck({
     await saveSubscriptions(data);
 
     // Optional realtime bot push when new subscribed articles arrive
-    if (runSummary.newArticles.length > 0) {
+    if (!skipRealtimePush && runSummary.newArticles.length > 0) {
       try {
         const pushRes = await triggerNewArticlesPush(runSummary.newArticles, {
           outputDir: store.outputDir,
