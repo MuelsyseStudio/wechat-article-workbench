@@ -18,8 +18,11 @@
   - 自动剥离微信头尾 UI 垃圾文本（`预览时标签不可点`、`继续滑动看下一个`、`取消 允许` 等）。
   - 自动写入规范 YAML Frontmatter（`title`、`account`、`author`、`published_at`、`ip_region`、`read_num`、`like_num`、`source_url`、`content_sha256`、`tags`）。
   - 基于 `review_id` / `article_key` / `source_url` / `content_sha256` / `公众号+日期+标题+时间戳` 多层去重（同日同标题不同发布时间会自动保留并追加 `_HHmm` 后缀），自动维护 `00_文章索引.md`，支持一键导出 Excel UTF-8 BOM CSV 与 `wechat_articles.jsonl`。
-- **开箱即用的本地 MCP 服务（14 个工具）**
-  - 界面一键实时启停 `Streamable HTTP` MCP（默认 `http://127.0.0.1:4546/mcp`），同时也支持独立 `stdio` 模式（`node mcp-server.mjs`），可直接接入各类 AI 客户端搜号、检索、同步和管理公众号订阅。
+- **多通道群聊机器人 & 每日定时日报（v2.4 新增，零封号官方通道）**
+  - 原生支持 **企业微信群机器人（自动 4KB 分片防截断）**、**飞书群机器人（交互卡片 + HMAC 签名）**、**钉钉群机器人（Markdown + 加签）**、**WxPusher（官方服务号直推个人微信）**、**自定义 JSON Webhook**，以及 **个人微信群纯文本播报文案一键复制**。
+  - 同时支持**「新文章实时推送」**与**「每日固定时间（如 `21:00`）汇总日报」**，密钥仅保存在本地 `data/push-config.json`。
+- **开箱即用的本地 MCP 服务（16 个工具）**
+  - 界面一键实时启停 `Streamable HTTP` MCP（默认 `http://127.0.0.1:4546/mcp`），同时也支持独立 `stdio` 模式（`node mcp-server.mjs`），可直接接入各类 AI 客户端搜号、检索、同步、管理订阅与触发群聊日报推送。
 
 ---
 
@@ -100,6 +103,13 @@ wxclean index -a 晚点LatePost -q 财报 -n 20
 wxclean read 财报                         # 直接在终端输出匹配的干净 Markdown 全文
 wxclean export-csv                       # 导出 Excel UTF-8 BOM 汇总 CSV
 wxclean export-jsonl                     # 导出 RAG/AI 就绪的 wechat_articles.jsonl
+
+# 6. 群聊机器人推送 & 每日定时日报
+wxclean push-list                        # 查看已配置的企微/飞书/钉钉/WxPusher 通道与日报定时
+wxclean push-add --type wecom --name "投研企微群" --webhook "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
+wxclean push-test                        # 发送连通性测试消息
+wxclean digest --hours 24 --wechat-text  # 生成并预览个人微信群纯文本播报文案
+wxclean digest --hours 24 --send         # 立即推送今日订阅日报至所有已启用机器人
 ```
 
 ---
@@ -165,7 +175,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-portable-zip.ps1
 ## 隐私、防风控与合规声明
 
 - **防风控配额建议（重要）**：微信读书对单个账号存在单日接口频率保护（实测单日连续拉取接近 1,500~1,800 篇易触发 `-2041 ErrorNeedVerify` 安全校验）。本工作台已内置**单日安全上限（默认 `1,200` 篇/日，界面可自定义）**、**每 35 篇自动冷却**、**软频控「操作频繁」自动退避重试**以及**长期凭证 `wr_rt` 无感续期**；批量回溯大号历史时建议等待时间设为 `4~6` 秒并分天完成（已归档篇目和已知空文下次均 0 耗时自动跳过）。
-- 本工具所有数据（微信读书登录态 `data/weread-profile/`、公众号后台搜号登录态 `data/mp-admin-profile/`、订阅配置 `data/subscriptions.json`、归档文章 `公众号清洗归档/`）均**严格保存在用户本地设备**，无任何远程上报或第三方服务器中转。
+- 本工具所有数据（微信读书登录态 `data/weread-profile/`、公众号后台搜号登录态 `data/mp-admin-profile/`、订阅配置 `data/subscriptions.json`、群聊机器人密钥 `data/push-config.json`、归档文章 `公众号清洗归档/`）均**严格保存在用户本地设备**，无任何远程上报或第三方服务器中转。
 - 严格遵循合规边界：**绝不绕过人机验证、验证码或登录鉴权**；遇到平台频控或登录失效会立即安全停止并保留已完成归档。
 - 本项目仅供个人学习、研究与合法资料整理备份，请尊重原创作者版权并遵守微信与微信读书平台相关用户协议，请勿高频滥用或用于商业非法采集。
 

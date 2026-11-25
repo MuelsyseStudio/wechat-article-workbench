@@ -22,6 +22,7 @@ import {
   saveWeReadAccount,
 } from "./weread-cdp.mjs";
 import { parseWechatUrlIdentity } from "./html-to-md.mjs";
+import { triggerNewArticlesPush } from "./notifier.mjs";
 
 export const SUBSCRIPTIONS_PATH = path.join(DATA_DIR, "subscriptions.json");
 
@@ -675,6 +676,30 @@ export async function runSubscriptionsCheck({
     data.recentRuns = data.recentRuns.slice(0, 30);
 
     await saveSubscriptions(data);
+
+    // Optional realtime bot push when new subscribed articles arrive
+    if (runSummary.newArticles.length > 0) {
+      try {
+        const pushRes = await triggerNewArticlesPush(runSummary.newArticles, {
+          outputDir: store.outputDir,
+          trigger,
+        });
+        if (pushRes) {
+          runSummary.pushResult = pushRes;
+          if (onProgress) {
+            onProgress({
+              phase: pushRes.failed > 0 ? "weread_warn" : "sub_new",
+              message: `📣 已触发新文实时推送（${runSummary.newArticles.length} 篇｜成功 ${pushRes.sent} 个通道｜失败 ${pushRes.failed} 个）`,
+            });
+          }
+        }
+      } catch (err) {
+        if (onProgress) {
+          onProgress({ phase: "weread_warn", message: `⚠️ 实时推送异常：${err?.message || err}` });
+        }
+      }
+    }
+
     return runSummary;
   } finally {
     session.close();

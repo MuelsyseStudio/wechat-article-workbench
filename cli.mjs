@@ -42,6 +42,16 @@ import {
   updateSubscriptionAccount,
   updateSubscriptionConfig,
 } from "./src/subscriptions.mjs";
+import {
+  CHANNEL_TYPES,
+  getPushSummary,
+  loadPushConfig,
+  maskTargetHint,
+  removePushChannel,
+  runDailyDigestPush,
+  sendTestPush,
+  upsertPushChannel,
+} from "./src/notifier.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG = JSON.parse(fsSync.readFileSync(path.join(__dirname, "package.json"), "utf8"));
@@ -90,6 +100,13 @@ function printHelp() {
   read <关键词或相对路径>            在终端直接预览指定已归档文章的干净 Markdown 正文
   export-csv                        导出已归档文章汇总表（UTF-8 BOM CSV，Excel 直接打开）
   export-jsonl                      导出全量归档数据为 wechat_articles.jsonl（AI / RAG 就绪）
+
+群聊机器人与定时日报推送:
+  push-list                         查看已配置的推送通道（企微/飞书/钉钉/WxPusher/Webhook）与日报定时
+  push-add [选项]                   添加推送通道（--type --name --webhook [--secret] / --app-token --topic-id）
+  push-test [channelId]             发送连通性测试消息（不填 id 则测试首个已启用通道）
+  push-remove <channelId>           删除指定推送通道
+  digest [--hours 24] [--send]      生成订阅日报（默认预览；加 --wechat-text 输出微信群纯文本；加 --send 立即推送）
 
 常用选项（均支持 --flag value 或 --flag=value）:
   -o, --out <dir>          输出归档目录（默认: ${DEFAULT_OUTPUT_DIR}）
@@ -180,6 +197,16 @@ function parseArgs(argv) {
     http: false,
     toggleOn: false,
     toggleOff: false,
+    pushType: "",
+    pushName: "",
+    webhook: "",
+    secret: "",
+    appToken: "",
+    topicIds: [],
+    uids: [],
+    hours: null,
+    send: false,
+    wechatText: false,
     json: false,
     version: false,
     help: false,
@@ -212,6 +239,16 @@ function parseArgs(argv) {
     else if (a === "--http") opts.http = true;
     else if (a === "--on") opts.toggleOn = true;
     else if (a === "--off") opts.toggleOff = true;
+    else if (a === "--type" && expanded[i + 1]) opts.pushType = expanded[++i];
+    else if (a === "--name" && expanded[i + 1]) opts.pushName = expanded[++i];
+    else if (a === "--webhook" && expanded[i + 1]) opts.webhook = expanded[++i];
+    else if (a === "--secret" && expanded[i + 1]) opts.secret = expanded[++i];
+    else if (a === "--app-token" && expanded[i + 1]) opts.appToken = expanded[++i];
+    else if (a === "--topic-id" && expanded[i + 1]) opts.topicIds.push(Number(expanded[++i]));
+    else if (a === "--uid" && expanded[i + 1]) opts.uids.push(expanded[++i]);
+    else if (a === "--hours" && expanded[i + 1]) opts.hours = Number(expanded[++i]);
+    else if (a === "--send") opts.send = true;
+    else if (a === "--wechat-text") opts.wechatText = true;
     else if (a === "--jsonl") opts.jsonl = true;
     else if (a === "--discover-related") opts.discoverRelated = true;
     else if (a === "--download-images") opts.downloadImages = true;
@@ -898,6 +935,122 @@ async function main() {
     const res = await exportArticlesJsonl({ outputDir: opts.out });
     if (opts.json) console.log(JSON.stringify(res, null, 2));
     else console.log(`✓ 已导出 ${res.count} 篇文章到 JSONL：${res.jsonlPath}`);
+    return;
+  }
+
+  // --- Multi-Channel Bot Push & Scheduled Daily Digest ---
+  if (command === "push-list") {
+    const cfg = await loadPushConfig();
+    if (opts.json) {
+      console.log(
+        JSON.stringify(
+          {
+            ...cfg,
+            channels: cfg.channels.map((c) => ({ ...c, targetHint: maskTargetHint(c) })),
+          },
+          null,
+          2
+        )
+      );
+      return;
+    }
+    const s = cfg.settings;
+    console.log(
+      `推送通道: ${cfg.channels.length} 个 | 新文实时推送: ${s.pushOnNewArticles ? "开启" : "关闭"} | 每日定时日报: ${
+        s.dailyDigestEnabled ? `开启 (每天 ${s.dailyDigestTime}，近 ${s.lookbackHours} 小时)` : "关闭"
+      }`
+    );
+    for (const c of cfg.channels) {
+      const label = CHANNEL_TYPES[c.type]?.short || c.type;
+      console.log(
+        `- [${c.enabled ? "启用" : "停用"}] ${c.name} (${c.id}) | ${label} | ${maskTargetHint(c)} | 状态: ${c.lastStatus}`
+      );
+    }
+    return;
+  }
+
+  if (command === "push-add") {
+    if (!opts.pushType) {
+      console.error("错误：请通过 --type 指定通道类型（wecom | feishu | dingtalk | wxpusher | custom_webhook）");
+      process.exit(1);
+    }
+    const res = await upsertPushChannel({
+      name: opts.pushName || CHANNEL_TYPES[opts.pushType]?.label || opts.pushType,
+      type: opts.pushType,
+      webhookUrl: opts.webhook,
+      secret: opts.secret,
+      appToken: opts.appToken,
+      topicIds: opts.topicIds,
+      uids: opts.uids,
+      enabled: true,
+    });
+    if (opts.json) {
+      console.log(JSON.stringify({ ok: true, channel: { ...res.channel, targetHint: maskTargetHint(res.channel) } }, null, 2));
+    } else {
+      console.log(`✓ 已添加推送通道：${res.channel.name} (${res.channel.id}) -> ${maskTargetHint(res.channel)}`);
+    }
+    return;
+  }
+
+  if (command === "push-remove") {
+    if (!args[0]) {
+      console.error("错误：请提供要删除的通道 id（可通过 wxclean push-list 查看）");
+      process.exit(1);
+    }
+    const res = await removePushChannel(args[0]);
+    if (opts.json) console.log(JSON.stringify(res, null, 2));
+    else console.log(res.removed > 0 ? `已删除推送通道 ${args[0]}` : `未找到推送通道 ${args[0]}`);
+    return;
+  }
+
+  if (command === "push-test") {
+    let targetId = args[0] || "";
+    if (!targetId) {
+      const cfg = await loadPushConfig();
+      const first = cfg.channels.find((c) => c.enabled) || cfg.channels[0];
+      if (!first) {
+        console.error("尚未配置任何推送通道，请先运行 wxclean push-add 或在 Web 工作台「群聊推送与日报」添加。");
+        process.exit(1);
+      }
+      targetId = first.id;
+    }
+    const res = await sendTestPush(targetId);
+    if (opts.json) {
+      console.log(JSON.stringify(res, null, 2));
+    } else if (res.ok) {
+      console.log(`✓ 测试发送成功 [${res.name}]：${res.message}`);
+    } else {
+      console.error(`✕ 测试发送失败 [${res.name}]：${res.error}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (command === "digest") {
+    const res = await runDailyDigestPush({
+      outputDir: opts.out,
+      trigger: "cli",
+      hours: opts.hours,
+      accounts: opts.account ? [opts.account] : null,
+      maxArticles: opts.max !== 200 ? opts.max : null,
+      previewOnly: !opts.send,
+    });
+    if (opts.json) {
+      console.log(JSON.stringify(res, null, 2));
+      return;
+    }
+    if (!opts.send) {
+      console.log(opts.wechatText ? res.digest.wechatGroupText : res.digest.markdown);
+      console.error(`\n[预览模式] 共收录 ${res.digest.articleCount} 篇；如需立即推送至已启用机器人，请追加 --send`);
+    } else {
+      console.log(`=== 订阅日报推送结果 ===`);
+      console.log(`收录篇数: ${res.digest.articleCount} | 成功通道: ${res.sent || 0} | 失败通道: ${res.failed || 0}`);
+      if (res.digestFile) console.log(`本地日报文件: ${res.digestFile}`);
+      for (const r of res.results || []) {
+        console.log(`  - [${r.ok ? "成功" : "失败"}] ${r.name}: ${r.ok ? r.message : r.error}`);
+      }
+      if (res.error) console.error(`⚠️ ${res.error}`);
+    }
     return;
   }
 

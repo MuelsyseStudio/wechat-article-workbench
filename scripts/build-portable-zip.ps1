@@ -129,7 +129,7 @@ foreach ($dirToCheck in @($SourceStage, $PortableStage)) {
     }
   }
   $badFiles = Get-ChildItem -LiteralPath $dirToCheck -Recurse -File | Where-Object {
-    $_.Name -match "weread-profile|subscriptions\.json|weread-accounts\.json|index\.json"
+    $_.Name -match "weread-profile|mp-admin-profile|subscriptions\.json|weread-accounts\.json|push-config\.json|index\.json"
   }
   if ($badFiles) {
     throw "LEAK GUARD FAILED: Found personal data files in staging dir!"

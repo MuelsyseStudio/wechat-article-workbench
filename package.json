@@ -1,7 +1,7 @@
 {
   "name": "wechat-article-workbench",
-  "version": "2.3.0",
-  "description": "零依赖微信公众号文章采集、按名称搜号换算、多号定时订阅与深度 Markdown 清洗工作台（Web UI + wxclean CLI + 本地 MCP）",
+  "version": "2.4.0",
+  "description": "零依赖微信公众号文章采集、按名称搜号换算、多号定时订阅、群聊机器人日报推送与深度 Markdown 清洗工作台（Web UI + wxclean CLI + 本地 MCP）",
   "license": "MIT",
   "type": "module",
   "private": false,

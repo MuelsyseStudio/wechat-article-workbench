@@ -27,6 +27,9 @@ const state = {
   dailyQuota: null,
   subscriptionSummary: null,
   subscriptionsData: null,
+  pushConfig: null,
+  digestPreviewData: null,
+  digestPreviewFormat: "wx", // "wx" | "md"
   activeTab: "log",
 };
 
@@ -645,6 +648,9 @@ async function refreshState(printBootLog = false) {
     renderAuthStatusBar();
     renderSavedAccounts();
     renderSubscriptionSummary(data.subscriptionSummary);
+    if (data.pushSummary && $("pushCountTab")) {
+      $("pushCountTab").textContent = String(data.pushSummary.enabledChannels || 0);
+    }
     state.dailyQuota = data.dailyQuota || null;
     renderDailyQuota(data.dailyQuota);
 
@@ -679,11 +685,11 @@ async function refreshState(printBootLog = false) {
     }
 
     if (printBootLog) {
-      appendLog("工作台已升级至 v2.3（微信读书全量 + 搜号换算 + wxclean CLI + 多号自动订阅）：支持界面操作，也支持在终端直接运行 wxclean / wxclean.cmd 全套命令！", "ok");
-      appendLog("使用方式：① 登录微信读书后，可粘贴单篇/合集链接、点击「搜公众号名」按名查号，或直接切到「公众号订阅」开启多号定时自动更新；② 单日拉取建议控制在 1200~1500 篇以内以防风控。", "info");
+      appendLog("工作台已升级至 v2.4（微信读书全量 + 搜号换算 + wxclean CLI + 群聊机器人定时日报）：支持企业微信、飞书、钉钉、WxPusher（推个人微信）、自定义 Webhook 及个人微信群一键复制日报！", "ok");
+      appendLog("使用方式：① 切到「公众号订阅」批量添加要追更的博主；② 切到「群聊推送与日报」添加企微/飞书/钉钉/WxPusher 机器人并开启每日定时日报或新文实时推送。", "info");
       if (state.mcpEnabled && state.mcpConfig) {
         appendLog(
-          `MCP 服务已启动在 ${state.mcpUrl}（共 14 个工具，含按名称搜号换算、全量同步与多号订阅），Streamable HTTP 配置示例：`,
+          `MCP 服务已启动在 ${state.mcpUrl}（共 16 个工具，含按名称搜号、多号订阅与群聊机器人定时日报），Streamable HTTP 配置示例：`,
           "ok",
           JSON.stringify(state.mcpConfig.streamableHttp, null, 2)
         );
@@ -1580,26 +1586,360 @@ async function handleSubmitAddSubscriptions(rawText, { category = "默认订阅"
   }
 }
 
+const PUSH_TYPE_GUIDES = {
+  wecom:
+    "在企业微信内部群右上角「添加群机器人」复制 Webhook 地址（https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...），零封号风险且自动按 4KB 分片防截断。",
+  feishu:
+    "在飞书群「设置 → 群机器人 → 添加自定义机器人」复制 Webhook（https://open.feishu.cn/open-apis/bot/v2/hook/...）；若开启了签名校验请填入 Secret。",
+  dingtalk:
+    "在钉钉群「群设置 → 机器人 → 添加自定义机器人」复制 Webhook（https://oapi.dingtalk.com/robot/send?access_token=...）；推荐开启「加签」并填入 SEC 开头的密钥。",
+  wxpusher:
+    "使用 WxPusher 官方微信服务号直推到个人微信（https://wxpusher.zjiecode.com/）：创建应用获取 AppToken，建一个主题获取 TopicID，群友扫码关注主题即可每天在个人微信里收到日报卡片。",
+  custom_webhook:
+    "向任意自定义 HTTP 接口 POST 结构化 JSON（含 title、markdown、plainText、articles 数组），可直接接入 n8n、Zapier、Telegram/Discord 中转或自建服务。",
+};
+
+const PUSH_TYPE_LABELS = {
+  wecom: "企业微信群",
+  feishu: "飞书群",
+  dingtalk: "钉钉群",
+  wxpusher: "个人微信 (WxPusher)",
+  custom_webhook: "自定义 Webhook",
+};
+
+function syncPushModalFields() {
+  const type = $("pushChannelType").value || "wecom";
+  const isWxPusher = type === "wxpusher";
+  const needsSecret = type === "feishu" || type === "dingtalk";
+  $("pushTypeGuide").textContent = PUSH_TYPE_GUIDES[type] || "";
+  $("pushWebhookFields").classList.toggle("hidden", isWxPusher);
+  $("pushWxPusherFields").classList.toggle("hidden", !isWxPusher);
+  $("pushSecretGroup").classList.toggle("hidden", !needsSecret);
+
+  const urlInput = $("pushWebhookUrl");
+  if (type === "wecom") urlInput.placeholder = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...";
+  else if (type === "feishu") urlInput.placeholder = "https://open.feishu.cn/open-apis/bot/v2/hook/...";
+  else if (type === "dingtalk") urlInput.placeholder = "https://oapi.dingtalk.com/robot/send?access_token=...";
+  else urlInput.placeholder = "https://your-webhook-endpoint.example.com/hook";
+}
+
+function openPushChannelModal(existing = null) {
+  $("pushChannelId").value = existing?.id || "";
+  $("pushChannelModalTitle").textContent = existing ? "编辑推送通道" : "添加群聊 / 微信推送通道";
+  $("pushChannelType").value = existing?.type || "wecom";
+  $("pushChannelName").value = existing?.name || "";
+  $("pushWebhookUrl").value = existing?.webhookUrl || "";
+  $("pushSecret").value = existing?.secret || "";
+  $("pushAppToken").value = existing?.appToken || "";
+  $("pushTopicIds").value = Array.isArray(existing?.topicIds) ? existing.topicIds.join(", ") : "";
+  $("pushUids").value = Array.isArray(existing?.uids) ? existing.uids.join(", ") : "";
+  syncPushModalFields();
+  $("pushChannelModal").classList.remove("hidden");
+  setTimeout(() => $("pushChannelName")?.focus(), 40);
+}
+
+function collectPushChannelModalPayload() {
+  const type = $("pushChannelType").value;
+  return {
+    id: $("pushChannelId").value.trim() || undefined,
+    type,
+    name: $("pushChannelName").value.trim() || PUSH_TYPE_LABELS[type] || type,
+    webhookUrl: $("pushWebhookUrl").value.trim(),
+    secret: $("pushSecret").value.trim(),
+    appToken: $("pushAppToken").value.trim(),
+    topicIds: $("pushTopicIds").value.trim(),
+    uids: $("pushUids").value.trim(),
+    enabled: true,
+  };
+}
+
+async function loadPushConfigTable() {
+  const tbody = $("pushTableBody");
+  if (!tbody) return;
+  try {
+    const res = await fetch("/api/push/config");
+    const cfg = await res.json();
+    state.pushConfig = cfg;
+
+    const s = cfg.settings || {};
+    $("optPushRealtime").checked = Boolean(s.pushOnNewArticles);
+    $("optPushDaily").checked = Boolean(s.dailyDigestEnabled);
+    $("optPushDailyTime").value = s.dailyDigestTime || "21:00";
+    if ([24, 48, 72, 168].includes(Number(s.lookbackHours))) {
+      $("optPushHours").value = String(s.lookbackHours);
+    }
+    if ([0, 80, 160, 300].includes(Number(s.excerptChars))) {
+      $("optPushExcerpt").value = String(s.excerptChars);
+    }
+
+    const channels = cfg.channels || [];
+    $("pushCountTab").textContent = String(channels.filter((c) => c.enabled).length);
+
+    if (channels.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">尚未添加群聊/微信推送通道，点击右上角「+ 添加推送通道」（支持企微/飞书/钉钉/WxPusher），或直接点「预览 / 复制微信群文案」手动转发。</td></tr>`;
+    } else {
+      tbody.innerHTML = "";
+      for (const ch of channels) {
+        const tr = document.createElement("tr");
+
+        const tdEn = document.createElement("td");
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.className = "sub-toggle-input";
+        cb.checked = Boolean(ch.enabled);
+        cb.addEventListener("change", async () => {
+          await fetch("/api/push/channels/toggle", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: ch.id, enabled: cb.checked }),
+          });
+          showToast(`${ch.name} 已${cb.checked ? "启用" : "停用"}`);
+          await loadPushConfigTable();
+        });
+        tdEn.appendChild(cb);
+
+        const tdName = document.createElement("td");
+        const box = document.createElement("div");
+        box.className = "sub-acc-cell";
+        const row = document.createElement("div");
+        row.className = "sub-acc-title-row";
+        const nameEl = document.createElement("span");
+        nameEl.className = "sub-acc-name";
+        nameEl.textContent = ch.name;
+        const badge = document.createElement("span");
+        badge.className = `push-type-badge push-type-${ch.type}`;
+        badge.textContent = PUSH_TYPE_LABELS[ch.type] || ch.type;
+        row.append(nameEl, badge);
+        const idEl = document.createElement("span");
+        idEl.className = "sub-book-id";
+        idEl.textContent = ch.id;
+        box.append(row, idEl);
+        tdName.appendChild(box);
+
+        const tdTarget = document.createElement("td");
+        tdTarget.className = "sub-book-id";
+        tdTarget.textContent = ch.targetHint || "—";
+
+        const tdSt = document.createElement("td");
+        const pill = document.createElement("span");
+        if (ch.lastStatus === "ok") {
+          pill.className = "sub-status-pill sub-st-ok";
+          pill.textContent = "发送成功";
+        } else if (ch.lastStatus === "error") {
+          pill.className = "sub-status-pill sub-st-warn";
+          pill.textContent = "发送失败";
+          if (ch.lastError) pill.title = ch.lastError;
+        } else {
+          pill.className = "sub-status-pill sub-st-idle";
+          pill.textContent = "尚未发送";
+        }
+        const tm = document.createElement("span");
+        tm.className = "sub-check-time";
+        tm.textContent = ch.lastSentAt ? formatShortTime(ch.lastSentAt) : "—";
+        tdSt.append(pill, tm);
+
+        const tdOps = document.createElement("td");
+        tdOps.style.textAlign = "right";
+        const ops = document.createElement("div");
+        ops.className = "row-ops";
+
+        const btnTest = document.createElement("button");
+        btnTest.type = "button";
+        btnTest.className = "link-btn";
+        btnTest.textContent = "发测试";
+        btnTest.addEventListener("click", async () => {
+          btnTest.disabled = true;
+          btnTest.textContent = "发送中...";
+          try {
+            const r = await fetch("/api/push/test", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: ch.id }),
+            });
+            const d = await r.json();
+            if (d.ok) {
+              appendLog(`✓ 测试推送成功 [${ch.name}]：${d.message}`, "ok");
+              showToast(`测试消息已发送至 ${ch.name}`);
+            } else {
+              appendLog(`✕ 测试推送失败 [${ch.name}]：${d.error || "未知错误"}`, "err");
+              showToast(`发送失败：${d.error || "请检查 Webhook"}`);
+            }
+            await loadPushConfigTable();
+          } finally {
+            btnTest.disabled = false;
+            btnTest.textContent = "发测试";
+          }
+        });
+
+        const btnEdit = document.createElement("button");
+        btnEdit.type = "button";
+        btnEdit.className = "link-btn";
+        btnEdit.textContent = "编辑";
+        btnEdit.addEventListener("click", () => openPushChannelModal(ch));
+
+        const btnDel = document.createElement("button");
+        btnDel.type = "button";
+        btnDel.className = "link-btn link-btn-danger";
+        btnDel.textContent = "删除";
+        btnDel.addEventListener("click", async () => {
+          await fetch("/api/push/channels/remove", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: ch.id }),
+          });
+          showToast(`已删除通道 ${ch.name}`);
+          await loadPushConfigTable();
+        });
+
+        ops.append(btnTest, btnEdit, btnDel);
+        tdOps.appendChild(ops);
+        tr.append(tdEn, tdName, tdTarget, tdSt, tdOps);
+        tbody.appendChild(tr);
+      }
+    }
+
+    const histBar = $("pushHistoryBar");
+    const hist = cfg.history || [];
+    if (hist.length > 0) {
+      const h = hist[0];
+      const trig = h.trigger === "scheduled" ? "定时" : h.trigger === "subscription" ? "新文实时" : "手动";
+      histBar.innerHTML = "";
+      const left = document.createElement("span");
+      left.textContent = `最近推送（${trig} · ${formatShortTime(h.at)}）：收录 ${h.articleCount} 篇 · 成功 ${h.sent} 通道 · 失败 ${h.failed}`;
+      const right = document.createElement("span");
+      right.textContent = s.dailyDigestEnabled
+        ? `每日 ${s.dailyDigestTime} 自动推送近 ${s.lookbackHours} 小时日报 · 配置：data/push-config.json`
+        : "配置已本地持久化：data/push-config.json";
+      histBar.append(left, right);
+    } else {
+      histBar.innerHTML = `<span>支持企业微信群、飞书群、钉钉群、WxPusher（个人微信直推）与自定义 Webhook；密钥仅存本地。</span><span>配置文件：data/push-config.json</span>`;
+    }
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">加载推送配置失败：${err.message}</td></tr>`;
+  }
+}
+
+async function handleSavePushSettings() {
+  try {
+    const payload = {
+      pushOnNewArticles: $("optPushRealtime").checked,
+      dailyDigestEnabled: $("optPushDaily").checked,
+      dailyDigestTime: $("optPushDailyTime").value || "21:00",
+      lookbackHours: Number($("optPushHours").value || 24),
+      excerptChars: Number($("optPushExcerpt").value ?? 160),
+    };
+    const res = await fetch("/api/push/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return showToast("保存推送设置失败");
+    showToast(
+      payload.dailyDigestEnabled
+        ? `已保存：每天 ${payload.dailyDigestTime} 自动推送近 ${payload.lookbackHours} 小时日报`
+        : "已保存推送设置"
+    );
+    await loadPushConfigTable();
+  } catch (err) {
+    showToast(`保存失败：${err.message}`);
+  }
+}
+
+function renderDigestPreviewBody() {
+  const d = state.digestPreviewData;
+  if (!d) return;
+  const isWx = state.digestPreviewFormat === "wx";
+  $("btnDigestFormatWx").classList.toggle("active", isWx);
+  $("btnDigestFormatMd").classList.toggle("active", !isWx);
+  $("digestPreviewText").value = isWx ? d.wechatGroupText || "" : d.markdown || "";
+  $("digestPreviewMeta").textContent = `${d.title} · 共收录 ${d.articleCount} 篇（涉及 ${d.accountCount} 个公众号 · 近 ${d.hours} 小时）`;
+}
+
+async function openDigestPreviewModal(hoursOverride = null) {
+  $("digestPreviewModal").classList.remove("hidden");
+  const hours = hoursOverride ?? Number($("optPushHours")?.value || 24);
+  $("digestPreviewHours").value = String(hours);
+  $("digestPreviewMeta").textContent = "正在汇总归档文章生成日报...";
+  $("digestPreviewText").value = "生成中，请稍候...";
+  try {
+    const res = await fetch("/api/push/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outputDir: state.outputDir || undefined, hours }),
+    });
+    const data = await res.json();
+    state.digestPreviewData = data.digest || null;
+    renderDigestPreviewBody();
+  } catch (err) {
+    $("digestPreviewText").value = `生成预览失败：${err.message}`;
+  }
+}
+
+async function handleSendDigestNow(hoursOverride = null) {
+  const hours = hoursOverride ?? Number($("optPushHours")?.value || 24);
+  const btn = $("btnSendDigestNow");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "推送中...";
+  }
+  try {
+    const res = await fetch("/api/push/send-digest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outputDir: state.outputDir || undefined, hours }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      const msg = data.error || (data.results || []).find((r) => !r.ok)?.error || "推送失败";
+      appendLog(`⚠️ 日报推送未完全成功：${msg}`, "warn");
+      showToast(msg);
+    } else {
+      appendLog(
+        `✓ 已推送今日订阅日报（收录 ${data.digest?.articleCount || 0} 篇，成功送达 ${data.sent} 个通道）${
+          data.digestFile ? `，本地已保存：${data.digestFile}` : ""
+        }`,
+        "ok"
+      );
+      showToast(`日报已成功推送至 ${data.sent} 个通道！`);
+    }
+    await loadPushConfigTable();
+  } catch (err) {
+    appendLog(`推送日报异常：${err.message}`, "err");
+    showToast(`推送失败：${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "立即推送日报";
+    }
+  }
+}
+
 function switchTab(which) {
   state.activeTab = which;
   const isLog = which === "log";
   const isSubs = which === "subs";
+  const isPush = which === "push";
   const isArchive = which === "archive";
 
   $("tabLog").classList.toggle("active", isLog);
   $("tabLog").setAttribute("aria-selected", String(isLog));
   $("tabSubs").classList.toggle("active", isSubs);
   $("tabSubs").setAttribute("aria-selected", String(isSubs));
+  $("tabPush").classList.toggle("active", isPush);
+  $("tabPush").setAttribute("aria-selected", String(isPush));
   $("tabArchive").classList.toggle("active", isArchive);
   $("tabArchive").setAttribute("aria-selected", String(isArchive));
 
   $("panelLog").classList.toggle("hidden", !isLog);
   $("panelSubs").classList.toggle("hidden", !isSubs);
+  $("panelPush").classList.toggle("hidden", !isPush);
   $("panelArchive").classList.toggle("hidden", !isArchive);
   $("btnClearLog").classList.toggle("hidden", !isLog);
 
   if (isSubs) {
     loadSubscriptionsTable();
+  } else if (isPush) {
+    loadPushConfigTable();
   } else if (isArchive) {
     loadArchiveTable();
   }
@@ -1966,6 +2306,97 @@ function bindEvents() {
       btn.disabled = false;
       btn.textContent = "确认加入订阅";
     }
+  });
+
+  // Push & Daily Digest tab controls + modals
+  $("tabPush").addEventListener("click", () => switchTab("push"));
+  $("optPushRealtime").addEventListener("change", handleSavePushSettings);
+  $("optPushDaily").addEventListener("change", handleSavePushSettings);
+  $("optPushDailyTime").addEventListener("change", handleSavePushSettings);
+  $("optPushHours").addEventListener("change", handleSavePushSettings);
+  $("optPushExcerpt").addEventListener("change", handleSavePushSettings);
+  $("btnOpenAddPushModal").addEventListener("click", () => openPushChannelModal(null));
+  $("btnPreviewDigest").addEventListener("click", () => openDigestPreviewModal());
+  $("btnSendDigestNow").addEventListener("click", () => handleSendDigestNow());
+
+  $("pushChannelType").addEventListener("change", syncPushModalFields);
+  $("btnClosePushModal").addEventListener("click", () => $("pushChannelModal").classList.add("hidden"));
+  $("btnCancelPushModal").addEventListener("click", () => $("pushChannelModal").classList.add("hidden"));
+  $("btnSavePushChannel").addEventListener("click", async () => {
+    const payload = collectPushChannelModalPayload();
+    try {
+      const res = await fetch("/api/push/channels/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast(data.error || "保存失败");
+      $("pushChannelModal").classList.add("hidden");
+      appendLog(`✓ 已保存推送通道：${data.channel.name} (${data.channel.targetHint})`, "ok");
+      showToast(`已保存推送通道 ${data.channel.name}`);
+      await loadPushConfigTable();
+      await refreshState(false);
+    } catch (err) {
+      showToast(`保存失败：${err.message}`);
+    }
+  });
+  $("btnTestUnsavedPush").addEventListener("click", async () => {
+    const payload = collectPushChannelModalPayload();
+    const btn = $("btnTestUnsavedPush");
+    btn.disabled = true;
+    btn.textContent = "测试中...";
+    try {
+      const res = await fetch("/api/push/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        showToast(`连通测试成功：${data.message}`);
+        appendLog(`✓ 推送通道测试成功 [${payload.name}]：${data.message}`, "ok");
+      } else {
+        showToast(`测试失败：${data.error || "请检查配置"}`);
+        appendLog(`✕ 推送通道测试失败 [${payload.name}]：${data.error || "未知错误"}`, "err");
+      }
+    } catch (err) {
+      showToast(`测试异常：${err.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "发送测试消息";
+    }
+  });
+
+  $("btnCloseDigestModal").addEventListener("click", () => $("digestPreviewModal").classList.add("hidden"));
+  $("btnDoneDigestModal").addEventListener("click", () => $("digestPreviewModal").classList.add("hidden"));
+  $("btnDigestFormatWx").addEventListener("click", () => {
+    state.digestPreviewFormat = "wx";
+    renderDigestPreviewBody();
+  });
+  $("btnDigestFormatMd").addEventListener("click", () => {
+    state.digestPreviewFormat = "md";
+    renderDigestPreviewBody();
+  });
+  $("btnReloadDigestPreview").addEventListener("click", () => {
+    openDigestPreviewModal(Number($("digestPreviewHours").value || 24));
+  });
+  $("digestPreviewHours").addEventListener("change", () => {
+    openDigestPreviewModal(Number($("digestPreviewHours").value || 24));
+  });
+  $("btnCopyDigestText").addEventListener("click", async () => {
+    const txt = $("digestPreviewText").value;
+    if (!txt) return showToast("暂无文案可复制");
+    try {
+      await navigator.clipboard.writeText(txt);
+      showToast("已复制日报文案，可直接粘贴到微信群！");
+    } catch {
+      $("digestPreviewText").select();
+      showToast("请按 Ctrl+C 复制选中内容");
+    }
+  });
+  $("btnPushFromPreview").addEventListener("click", () => {
+    handleSendDigestNow(Number($("digestPreviewHours").value || 24));
   });
 
   // Tabs & Archive controls

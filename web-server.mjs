@@ -44,6 +44,19 @@ import {
   updateSubscriptionAccount,
   updateSubscriptionConfig,
 } from "./src/subscriptions.mjs";
+import {
+  CHANNEL_TYPES,
+  checkAndRunScheduledDailyDigest,
+  getPushSummary,
+  loadPushConfig,
+  maskTargetHint,
+  removePushChannel,
+  runDailyDigestPush,
+  sendTestPush,
+  togglePushChannel,
+  updatePushSettings,
+  upsertPushChannel,
+} from "./src/notifier.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -354,6 +367,7 @@ const server = http.createServer(async (req, res) => {
       const savedWeReadAccounts = await loadSavedWeReadAccounts(idx.outputDir);
       const subsData = await loadSubscriptions({ outputDir: idx.outputDir });
       const dailyQuota = await getDailyWeReadQuota(idx.outputDir);
+      const pushSummary = await getPushSummary();
       sendJson(res, 200, {
         server: SERVER_INFO,
         port: PORT,
@@ -369,6 +383,7 @@ const server = http.createServer(async (req, res) => {
         mpAdminStatus,
         savedWeReadAccounts,
         dailyQuota,
+        pushSummary,
         subscriptionSummary: {
           total: subsData.accounts.length,
           enabledCount: subsData.accounts.filter((a) => a.enabled).length,
@@ -381,6 +396,105 @@ const server = http.createServer(async (req, res) => {
           lastNotice: schedulerRuntime.lastScheduledNotice || "",
         },
       });
+      return;
+    }
+
+    // Multi-Channel Bot Push & Scheduled Daily Digest REST APIs
+    if (pathname === "/api/push/config" && req.method === "GET") {
+      const cfg = await loadPushConfig();
+      sendJson(res, 200, {
+        ...cfg,
+        channelTypes: CHANNEL_TYPES,
+        channels: cfg.channels.map((c) => ({ ...c, targetHint: maskTargetHint(c) })),
+      });
+      return;
+    }
+
+    if (pathname === "/api/push/settings" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const cfg = await updatePushSettings(body);
+      sendJson(res, 200, {
+        ...cfg,
+        channels: cfg.channels.map((c) => ({ ...c, targetHint: maskTargetHint(c) })),
+      });
+      return;
+    }
+
+    if (pathname === "/api/push/channels/save" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const { channel, config } = await upsertPushChannel(body);
+      sendJson(res, 200, {
+        channel: { ...channel, targetHint: maskTargetHint(channel) },
+        config: {
+          ...config,
+          channels: config.channels.map((c) => ({ ...c, targetHint: maskTargetHint(c) })),
+        },
+      });
+      return;
+    }
+
+    if (pathname === "/api/push/channels/toggle" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      if (!body.id) {
+        sendJson(res, 400, { error: "缺少通道 id" });
+        return;
+      }
+      const { channel, config } = await togglePushChannel(body.id, body.enabled);
+      sendJson(res, 200, {
+        channel: { ...channel, targetHint: maskTargetHint(channel) },
+        config: {
+          ...config,
+          channels: config.channels.map((c) => ({ ...c, targetHint: maskTargetHint(c) })),
+        },
+      });
+      return;
+    }
+
+    if (pathname === "/api/push/channels/remove" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      if (!body.id) {
+        sendJson(res, 400, { error: "缺少通道 id" });
+        return;
+      }
+      const resDel = await removePushChannel(body.id);
+      sendJson(res, 200, resDel);
+      return;
+    }
+
+    if (pathname === "/api/push/test" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const target = body.id ? String(body.id) : body;
+      const result = await sendTestPush(target);
+      sendJson(res, result.ok ? 200 : 400, result);
+      return;
+    }
+
+    if (pathname === "/api/push/preview" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const resPrev = await runDailyDigestPush({
+        outputDir: body.outputDir || DEFAULT_OUTPUT_DIR,
+        hours: body.hours !== undefined ? Number(body.hours) : null,
+        accounts: Array.isArray(body.accounts) ? body.accounts : null,
+        maxArticles: body.maxArticles !== undefined ? Number(body.maxArticles) : null,
+        previewOnly: true,
+      });
+      sendJson(res, 200, resPrev);
+      return;
+    }
+
+    if (pathname === "/api/push/send-digest" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const resSend = await runDailyDigestPush({
+        outputDir: body.outputDir || DEFAULT_OUTPUT_DIR,
+        trigger: "manual",
+        hours: body.hours !== undefined ? Number(body.hours) : null,
+        accounts: Array.isArray(body.accounts) ? body.accounts : null,
+        maxArticles: body.maxArticles !== undefined ? Number(body.maxArticles) : null,
+        channelIds: Array.isArray(body.channelIds) ? body.channelIds : [],
+        previewOnly: false,
+        skipIfEmpty: false,
+      });
+      sendJson(res, resSend.ok ? 200 : 400, resSend);
       return;
     }
 
@@ -1041,13 +1155,20 @@ server.on("error", (err) => {
 server.listen(PORT, HOST, () => {
   const webUrl = `http://${HOST}:${PORT}`;
   console.log(`========================================================`);
-  console.log(`  微信公众号文章采集、订阅与清洗工作台 v2.3 (Web + wxclean CLI + MCP)`);
+  console.log(`  微信公众号文章采集、订阅与清洗工作台 v2.4 (Web + CLI + 群聊日报推送 + MCP)`);
   console.log(`  Web 界面: ${webUrl}`);
   console.log(`  MCP 端点: ${webUrl}/mcp`);
   console.log(`  默认归档: ${DEFAULT_OUTPUT_DIR}`);
   console.log(`========================================================`);
-  console.log(`  提示：保持此窗口开启即可维持定时自动订阅，按 Ctrl+C 停止服务。`);
+  console.log(`  提示：保持此窗口开启即可维持定时自动订阅与每日群聊日报，按 Ctrl+C 停止服务。`);
   rescheduleSubscriptionTimer().catch(() => {});
+  // Check scheduled daily digest once per minute
+  setInterval(() => {
+    checkAndRunScheduledDailyDigest({
+      outputDir: DEFAULT_OUTPUT_DIR,
+      logger: (msg) => console.log(msg),
+    }).catch((err) => console.error("[每日日报调度异常]", err?.message || err));
+  }, 60 * 1000);
   if (AUTO_OPEN) {
     setTimeout(() => openUrlInDefaultBrowser(webUrl), 350);
   }

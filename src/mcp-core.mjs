@@ -27,10 +27,20 @@ import {
   updateSubscriptionAccount,
   updateSubscriptionConfig,
 } from "./subscriptions.mjs";
+import {
+  loadPushConfig,
+  maskTargetHint,
+  removePushChannel,
+  runDailyDigestPush,
+  sendTestPush,
+  togglePushChannel,
+  updatePushSettings,
+  upsertPushChannel,
+} from "./notifier.mjs";
 
 export const SERVER_INFO = {
   name: "wechat-article-cleaner-mcp",
-  version: "2.3.0",
+  version: "2.4.0",
 };
 
 export const SUPPORTED_PROTOCOL_VERSION = "2025-06-18";
@@ -292,6 +302,55 @@ export const MCP_TOOLS = [
       required: ["query"],
     },
   },
+  {
+    name: "manage_push_channels",
+    description:
+      "管理多通道群聊机器人与个人微信推送（支持企业微信 wecom、飞书 feishu、钉钉 dingtalk、WxPusher 个人微信直推、自定义 Webhook）：支持 list、add、toggle、remove、configure、test。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list", "add", "toggle", "remove", "configure", "test"],
+          description: "操作类型：list | add | toggle | remove | configure | test",
+        },
+        id: { type: "string", description: "通道 id（toggle / remove / test 时使用）" },
+        name: { type: "string", description: "通道名称（add 时使用，例如 投研企微群）" },
+        type: {
+          type: "string",
+          enum: ["wecom", "feishu", "dingtalk", "wxpusher", "custom_webhook"],
+          description: "通道类型",
+        },
+        webhook_url: { type: "string", description: "Webhook 地址（企微 / 飞书 / 钉钉 / 自定义）" },
+        secret: { type: "string", description: "可选加签密钥（钉钉 SEC... 或飞书签名校验密钥）" },
+        app_token: { type: "string", description: "WxPusher AppToken（AT_...）" },
+        topic_ids: { type: "array", items: { type: "number" }, description: "WxPusher 主题 ID 数组" },
+        uids: { type: "array", items: { type: "string" }, description: "WxPusher 用户 UID 数组" },
+        enabled: { type: "boolean", description: "启用/停用状态" },
+        push_on_new_articles: { type: "boolean", description: "configure：新文章入库时是否实时推送" },
+        daily_digest_enabled: { type: "boolean", description: "configure：是否开启每日定时日报" },
+        daily_digest_time: { type: "string", description: "configure：每日推送时间 HH:mm（如 21:00）" },
+        lookback_hours: { type: "number", description: "configure：日报回溯小时数（1~168），默认 24" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "send_daily_digest",
+    description:
+      "生成今日公众号订阅汇总日报（同时产出机器人 Markdown 版与纯文本微信群转发文案），可仅预览或立即推送到全部已启用的企微/飞书/钉钉/WxPusher 通道。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        preview_only: { type: "boolean", description: "true 表示仅生成并预览不发送，false 表示立即发送，默认 true" },
+        hours: { type: "number", description: "回溯小时数，默认读取配置（24）" },
+        accounts: { type: "array", items: { type: "string" }, description: "可选：仅汇总指定公众号名列表" },
+        max_articles: { type: "number", description: "最多收录篇数，默认 20" },
+        channel_ids: { type: "array", items: { type: "string" }, description: "可选：仅发送到指定通道 id 列表" },
+        output_dir: { type: "string", description: `归档目录，默认：${DEFAULT_OUTPUT_DIR}` },
+      },
+    },
+  },
 ];
 
 export async function executeMcpTool(name, args = {}) {
@@ -461,6 +520,73 @@ export async function executeMcpTool(name, args = {}) {
       return await searchMpAdminAccountsByName(args.query, {
         count: typeof args.count === "number" ? Math.max(1, Math.min(10, args.count)) : 5,
         autoLaunch: true,
+      });
+
+    case "manage_push_channels": {
+      const action = String(args.action || "list").toLowerCase();
+      if (action === "list") {
+        const cfg = await loadPushConfig();
+        return {
+          settings: cfg.settings,
+          channels: cfg.channels.map((c) => ({
+            id: c.id,
+            name: c.name,
+            type: c.type,
+            enabled: c.enabled,
+            targetHint: maskTargetHint(c),
+            lastSentAt: c.lastSentAt,
+            lastStatus: c.lastStatus,
+            lastError: c.lastError,
+          })),
+          recentHistory: cfg.history.slice(0, 5),
+        };
+      }
+      if (action === "add") {
+        const res = await upsertPushChannel({
+          id: args.id,
+          name: args.name,
+          type: args.type,
+          enabled: args.enabled !== false,
+          webhookUrl: args.webhook_url,
+          secret: args.secret,
+          appToken: args.app_token,
+          topicIds: args.topic_ids,
+          uids: args.uids,
+        });
+        return { ok: true, channel: { ...res.channel, targetHint: maskTargetHint(res.channel) } };
+      }
+      if (action === "toggle") {
+        if (!args.id) throw new Error("toggle 操作必须提供通道 id");
+        return await togglePushChannel(args.id, args.enabled);
+      }
+      if (action === "remove") {
+        if (!args.id) throw new Error("remove 操作必须提供通道 id");
+        return await removePushChannel(args.id);
+      }
+      if (action === "configure") {
+        return await updatePushSettings({
+          ...(typeof args.push_on_new_articles === "boolean" ? { pushOnNewArticles: args.push_on_new_articles } : {}),
+          ...(typeof args.daily_digest_enabled === "boolean" ? { dailyDigestEnabled: args.daily_digest_enabled } : {}),
+          ...(args.daily_digest_time ? { dailyDigestTime: args.daily_digest_time } : {}),
+          ...(args.lookback_hours !== undefined ? { lookbackHours: Number(args.lookback_hours) } : {}),
+        });
+      }
+      if (action === "test") {
+        if (!args.id) throw new Error("test 操作必须提供通道 id");
+        return await sendTestPush(args.id);
+      }
+      throw new Error(`Unsupported push action: ${action}`);
+    }
+
+    case "send_daily_digest":
+      return await runDailyDigestPush({
+        outputDir: args.output_dir || DEFAULT_OUTPUT_DIR,
+        trigger: "mcp",
+        hours: typeof args.hours === "number" ? args.hours : null,
+        accounts: Array.isArray(args.accounts) ? args.accounts : null,
+        maxArticles: typeof args.max_articles === "number" ? args.max_articles : null,
+        channelIds: Array.isArray(args.channel_ids) ? args.channel_ids : [],
+        previewOnly: args.preview_only !== false,
       });
 
     default:

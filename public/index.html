@@ -21,7 +21,7 @@
         <div class="brand-text">
           <div class="brand-title-row">
             <h1>微信公众号文章采集与清洗工作台</h1>
-            <span class="badge badge-teal">v2.3 · 全量历史 + 搜号换算 + CLI + 多号订阅</span>
+            <span class="badge badge-teal">v2.4 · 全量历史 + 搜号 + CLI + 群聊日报推送</span>
           </div>
           <p class="brand-sub" id="outputDirLabel">归档目录：加载中...</p>
         </div>
@@ -287,6 +287,9 @@
           <button type="button" class="tab-btn" id="tabSubs" role="tab" aria-selected="false">
             公众号订阅 <span class="tab-count" id="subCountTab">0</span>
           </button>
+          <button type="button" class="tab-btn" id="tabPush" role="tab" aria-selected="false">
+            群聊推送与日报 <span class="tab-count" id="pushCountTab">0</span>
+          </button>
           <button type="button" class="tab-btn" id="tabArchive" role="tab" aria-selected="false">
             已归档文章库 <span class="tab-count" id="archivedCountTab">0</span>
           </button>
@@ -360,6 +363,63 @@
         </div>
       </div>
 
+      <!-- Tab Panel 2.5: Multi-Channel Bot Push & Scheduled Daily Digest -->
+      <div class="tab-panel hidden" id="panelPush">
+        <div class="push-toolbar">
+          <div class="push-toolbar-left">
+            <label class="switch-control" for="optPushRealtime" title="每次订阅自动检查发现新文章后，立即推送到已启用的机器人通道">
+              <input type="checkbox" id="optPushRealtime" />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-label">新文实时推送</span>
+            </label>
+            <label class="switch-control" for="optPushDaily" title="每天在指定时间把最近收录的订阅文章汇总成一份日报自动发群">
+              <input type="checkbox" id="optPushDaily" />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-label">每日定时日报</span>
+            </label>
+            <input type="time" id="optPushDailyTime" class="control-time" value="21:00" title="每日定时推送时间（北京时间）" />
+            <select id="optPushHours" class="control-select sub-interval-select" title="日报回溯窗口">
+              <option value="24" selected>近 24 小时</option>
+              <option value="48">近 48 小时</option>
+              <option value="72">近 3 天</option>
+              <option value="168">近 7 天</option>
+            </select>
+            <select id="optPushExcerpt" class="control-select sub-interval-select" title="每篇文章附带的摘要字数">
+              <option value="160" selected>摘要 160 字</option>
+              <option value="80">摘要 80 字</option>
+              <option value="300">摘要 300 字</option>
+              <option value="0">仅发标题</option>
+            </select>
+          </div>
+          <div class="push-toolbar-right">
+            <button type="button" class="mini-btn mini-btn-indigo" id="btnPreviewDigest">预览 / 复制微信群文案</button>
+            <button type="button" class="mini-btn mini-btn-accent" id="btnOpenAddPushModal">+ 添加推送通道</button>
+            <button type="button" class="mini-btn mini-btn-primary" id="btnSendDigestNow">立即推送日报</button>
+          </div>
+        </div>
+
+        <div class="archive-table-wrap sub-table-wrap">
+          <table class="archive-table">
+            <thead>
+              <tr>
+                <th style="width: 60px;">启用</th>
+                <th style="width: 210px;">通道名称 / 平台</th>
+                <th>目标地址（已脱敏，本地保存）</th>
+                <th style="width: 175px;">最近发送 / 状态</th>
+                <th style="width: 155px; text-align: right;">操作</th>
+              </tr>
+            </thead>
+            <tbody id="pushTableBody">
+              <tr><td colspan="5" class="empty-cell">加载推送通道配置中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="sub-history-bar" id="pushHistoryBar">
+          <span>支持企业微信群、飞书群、钉钉群、WxPusher（推个人微信）与自定义 Webhook；所有密钥仅保存在本地 data/push-config.json。</span>
+        </div>
+      </div>
+
       <!-- Tab Panel 3: Archive Library -->
       <div class="tab-panel hidden" id="panelArchive">
         <div class="archive-toolbar">
@@ -388,6 +448,108 @@
         </div>
       </div>
     </section>
+  </div>
+
+  <!-- Modal: Add / Edit Push Channel -->
+  <div class="modal-backdrop hidden" id="pushChannelModal">
+    <div class="modal-card modal-search" role="dialog" aria-modal="true" aria-labelledby="pushChannelModalTitle">
+      <div class="modal-header">
+        <h2 id="pushChannelModalTitle">添加群聊 / 微信推送通道</h2>
+        <button type="button" class="icon-close" id="btnClosePushModal" aria-label="关闭">&times;</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="pushChannelId" value="" />
+        <div class="modal-row-2">
+          <div class="field-group">
+            <label for="pushChannelType">推送平台</label>
+            <select id="pushChannelType" class="control-select">
+              <option value="wecom">企业微信群机器人（推荐）</option>
+              <option value="feishu">飞书群机器人</option>
+              <option value="dingtalk">钉钉群机器人</option>
+              <option value="wxpusher">WxPusher（个人微信直推）</option>
+              <option value="custom_webhook">通用 JSON Webhook</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label for="pushChannelName">通道名称（便于区分）</label>
+            <input type="text" id="pushChannelName" placeholder="例如：投研交流企微群" />
+          </div>
+        </div>
+
+        <div class="push-guide-box" id="pushTypeGuide">
+          在企业微信内部群右上角「添加群机器人」复制 Webhook 地址（https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...），零封号风险且自动按 4KB 分片防截断。
+        </div>
+
+        <div id="pushWebhookFields">
+          <div class="field-group">
+            <label for="pushWebhookUrl">Webhook URL</label>
+            <input type="text" id="pushWebhookUrl" spellcheck="false" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." />
+          </div>
+          <div class="field-group hidden" id="pushSecretGroup">
+            <label for="pushSecret">加签密钥 Secret（可选，若群机器人开启了签名校验请填写）</label>
+            <input type="password" id="pushSecret" spellcheck="false" placeholder="钉钉 SEC... 或飞书签名校验密钥（未开启可留空）" />
+          </div>
+        </div>
+
+        <div id="pushWxPusherFields" class="hidden">
+          <div class="field-group">
+            <label for="pushAppToken">WxPusher AppToken（AT_...）</label>
+            <input type="password" id="pushAppToken" spellcheck="false" placeholder="在 wxpusher.zjiecode.com 后台创建应用获取 AT_..." />
+          </div>
+          <div class="modal-row-2">
+            <div class="field-group">
+              <label for="pushTopicIds">TopicIDs（主题 ID，逗号分隔，多人订阅同一频道）</label>
+              <input type="text" id="pushTopicIds" spellcheck="false" placeholder="例如：12345" />
+            </div>
+            <div class="field-group">
+              <label for="pushUids">UIDs（个人 UID，逗号分隔，与 TopicID 二选一）</label>
+              <input type="text" id="pushUids" spellcheck="false" placeholder="例如：UID_xxxxxxxx" />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btnCancelPushModal">取消</button>
+        <button type="button" class="btn btn-accent-soft" id="btnTestUnsavedPush">发送测试消息</button>
+        <button type="button" class="btn btn-primary" id="btnSavePushChannel">保存通道</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Daily Digest Preview & 1-Click Copy for Personal WeChat Group -->
+  <div class="modal-backdrop hidden" id="digestPreviewModal">
+    <div class="modal-card modal-digest" role="dialog" aria-modal="true" aria-labelledby="digestPreviewTitle">
+      <div class="modal-header">
+        <div>
+          <h2 id="digestPreviewTitle">订阅日报预览 &amp; 个人微信群转发文案</h2>
+          <p class="drawer-sub" id="digestPreviewMeta">正在生成日报预览...</p>
+        </div>
+        <button type="button" class="icon-close" id="btnCloseDigestModal" aria-label="关闭">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="digest-switch-row">
+          <div class="channel-switch">
+            <button type="button" class="channel-btn active" id="btnDigestFormatWx">个人微信群纯文本版（推荐复制）</button>
+            <button type="button" class="channel-btn" id="btnDigestFormatMd">群机器人 Markdown 版</button>
+          </div>
+          <div class="digest-window-ops">
+            <select id="digestPreviewHours" class="control-select sub-interval-select">
+              <option value="24">近 24 小时</option>
+              <option value="48">近 48 小时</option>
+              <option value="72">近 3 天</option>
+              <option value="168">近 7 天</option>
+            </select>
+            <button type="button" class="mini-btn" id="btnReloadDigestPreview">重新生成</button>
+          </div>
+        </div>
+        <textarea id="digestPreviewText" class="digest-preview-box" rows="13" readonly></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btnDoneDigestModal">关闭</button>
+        <button type="button" class="btn btn-accent-soft" id="btnPushFromPreview">推送至已启用机器人</button>
+        <button type="button" class="btn btn-primary" id="btnCopyDigestText">一键复制文案</button>
+      </div>
+    </div>
   </div>
 
   <!-- Modal: Search Official Account by Name (MP Admin searchbiz -> MP_WXS_...) -->
