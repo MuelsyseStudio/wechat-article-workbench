@@ -679,7 +679,7 @@ async function refreshState(printBootLog = false) {
     }
 
     if (printBootLog) {
-      appendLog("工作台已升级至 v2.2（微信读书全量通道 + 按公众号名搜号换算 + 多号自动订阅）：新增「搜公众号名」助手，输入名称一键换算 MP_WXS_...！", "ok");
+      appendLog("工作台已升级至 v2.3（微信读书全量 + 搜号换算 + wxclean CLI + 多号自动订阅）：支持界面操作，也支持在终端直接运行 wxclean / wxclean.cmd 全套命令！", "ok");
       appendLog("使用方式：① 登录微信读书后，可粘贴单篇/合集链接、点击「搜公众号名」按名查号，或直接切到「公众号订阅」开启多号定时自动更新；② 单日拉取建议控制在 1200~1500 篇以内以防风控。", "info");
       if (state.mcpEnabled && state.mcpConfig) {
         appendLog(

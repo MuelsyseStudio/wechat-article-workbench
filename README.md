@@ -49,32 +49,57 @@ node web-server.mjs --port 4546 --open
 
 ---
 
-## CLI 命令行用法
+## CLI 命令行工具（`wxclean`）
+
+本仓库内置零依赖完整命令行工具 **`wxclean`**，支持全局安装、Windows 便携版直接调用或源码运行，并且所有命令均支持 `--json` 纯 JSON 输出（方便自动化脚本与 AI 管道调用）。
+
+### 安装与调用方式
 
 ```bash
-# 1. 微信读书扫码登录
-node cli.mjs weread-login
+# 方式 A：全局注册 wxclean 命令（推荐，之后在任意目录直接输入 wxclean）
+npm link
+wxclean doctor
 
-# 2. 解析公众号全量历史目录（支持单篇文章链接 / 合集链接 / MP_WXS_...）
-node cli.mjs weread-list MP_WXS_1234567890 --from 2024-01-01
+# 方式 B：Windows 绿色便携版（免装 Node.js，解压后直接运行）
+.\wxclean.cmd doctor
+.\wxclean.cmd --help
 
-# 3. 批量拉取正文并深度清洗为干净 Markdown（断点续传去重）
-node cli.mjs weread-sync MP_WXS_1234567890 --from 2024-01-01 --delay 4000 --jsonl
+# 方式 C：源码目录直接运行
+node cli.mjs doctor
+```
 
-# 4. 按公众号名称搜索并换算为 MP_WXS_<数字>（基于个人公众号后台 searchbiz）
-node cli.mjs mp-login
-node cli.mjs mp-search "公众号名称"
+### 常用命令速查
 
-# 5. 多公众号定时订阅管理
-node cli.mjs sub-list
-node cli.mjs sub-add MP_WXS_1234567890 https://mp.weixin.qq.com/s/xxxxxxx --category 投研
-node cli.mjs sub-sync
-node cli.mjs sub-watch --interval 60
+```bash
+# 1. 环境体检 / 今日配额 / 启动 Web 工作台与 MCP
+wxclean doctor                           # 一键检查 Node、浏览器、登录态、配额、归档与订阅
+wxclean quota                            # 查看今日拉取篇数 vs 单日安全上限（默认 1200）
+wxclean serve --open                     # 启动本地 Web 工作台（默认端口 4546）并自动打开浏览器
+wxclean mcp                              # 启动 stdio MCP 服务（加 --http 启动 HTTP 端点）
 
-# 6. 公开链接抓取 / 本地目录净化 / 知识库检索
-node cli.mjs fetch https://mp.weixin.qq.com/s/xxxxxxx
-node cli.mjs clean-dir "/path/to/exported/articles"
-node cli.mjs index --keyword 关键词
+# 2. 登录 & 按公众号名称搜号换算
+wxclean login                            # 微信扫码登录微信读书
+wxclean mp-login                         # 可选：扫码个人公众号后台（用于按名称搜号）
+wxclean search "晚点LatePost"            # 按名称搜公众号，自动换算为 MP_WXS_<数字> 与 __biz
+
+# 3. 全量目录解析 & 批量下载清洗（支持公众号名 / 单篇链接 / 合集链接 / MP_WXS_...）
+wxclean list MP_WXS_1234567890 --from 2024-01-01
+wxclean sync MP_WXS_1234567890 --from 2024-01-01 --delay 4000 --only-original --jsonl
+
+# 4. 多公众号定时订阅管理
+wxclean sub                              # 查看所有订阅与自动更新设置
+wxclean sub-add MP_WXS_1234567890 --category 投研 --from 2025-01-01
+wxclean sub-toggle MP_WXS_1234567890 --off
+wxclean sub-sync                         # 立即增量同步所有已启用订阅
+wxclean sub-watch --interval 60          # 终端常驻守护，每 60 分钟自动检查更新
+
+# 5. 公开链接直抓 / 本地目录清洗 / 知识库检索、阅读与导出
+wxclean fetch https://mp.weixin.qq.com/s/xxxxxxx
+wxclean clean-dir "/path/to/exported/articles"
+wxclean index -a 晚点LatePost -q 财报 -n 20
+wxclean read 财报                         # 直接在终端输出匹配的干净 Markdown 全文
+wxclean export-csv                       # 导出 Excel UTF-8 BOM 汇总 CSV
+wxclean export-jsonl                     # 导出 RAG/AI 就绪的 wechat_articles.jsonl
 ```
 
 ---

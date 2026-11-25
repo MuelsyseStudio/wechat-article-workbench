@@ -37,6 +37,7 @@ $RootFiles = @(
   "README.md",
   "LICENSE",
   "启动前端工作台.bat",
+  "wxclean.cmd",
   "start.sh"
 )
 
@@ -81,6 +82,15 @@ $QuickStartTxt = @"
 
 【下载文件在哪里？】
 默认自动保存在本文件夹下的「公众号清洗归档」目录中（按公众号分文件夹，附带 00_文章索引.md 与 CSV 导出）。
+
+【命令行 CLI 用法（可选，无需安装 Node.js）】
+在解压目录打开终端 / PowerShell，即可直接运行内置 CLI：
+  .\wxclean.cmd doctor                         一键环境与归档体检
+  .\wxclean.cmd login                          扫码登录微信读书
+  .\wxclean.cmd search "晚点LatePost"          按公众号名换算 MP_WXS_...
+  .\wxclean.cmd sync MP_WXS_1234567890         拉取并清洗 Markdown
+  .\wxclean.cmd index -q 关键词                检索本地已归档文章
+  .\wxclean.cmd --help                         查看全部 CLI 命令
 
 【温馨提示】
 - 本绿色版已内置官方 Node.js 运行时（runtime\node.exe），无需额外安装任何环境；

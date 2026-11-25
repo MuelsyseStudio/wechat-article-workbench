@@ -30,7 +30,7 @@ import {
 
 export const SERVER_INFO = {
   name: "wechat-article-cleaner-mcp",
-  version: "2.2.0",
+  version: "2.3.0",
 };
 
 export const SUPPORTED_PROTOCOL_VERSION = "2025-06-18";

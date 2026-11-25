@@ -1041,7 +1041,7 @@ server.on("error", (err) => {
 server.listen(PORT, HOST, () => {
   const webUrl = `http://${HOST}:${PORT}`;
   console.log(`========================================================`);
-  console.log(`  微信公众号文章采集、订阅与清洗工作台 v2.2 (全量历史 + 搜号换算 + MCP)`);
+  console.log(`  微信公众号文章采集、订阅与清洗工作台 v2.3 (Web + wxclean CLI + MCP)`);
   console.log(`  Web 界面: ${webUrl}`);
   console.log(`  MCP 端点: ${webUrl}/mcp`);
   console.log(`  默认归档: ${DEFAULT_OUTPUT_DIR}`);
