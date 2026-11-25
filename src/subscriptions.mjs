@@ -458,9 +458,20 @@ export async function runSubscriptionsCheck({
             runSummary.needsLogin = true;
             runSummary.stoppedEarly = true;
             runSummary.stopReason = accErr;
-          } else if (code === -2013 || code === 429 || pageRes.status === 0 || /限速|断开|ERR_CONNECTION_CLOSED/.test(accErr)) {
+          } else if (
+            code === -2041 ||
+            code === -2013 ||
+            code === 429 ||
+            pageRes.status === 0 ||
+            /限速|频控|安全校验|ErrorNeedVerify|断开|ERR_CONNECTION_CLOSED/.test(accErr)
+          ) {
             runSummary.stoppedEarly = true;
             runSummary.stopReason = accErr;
+            // On -2041 during scheduled runs, pause auto-scheduler so it does not keep poking WeRead and extending cooldown
+            if (code === -2041 && trigger === "scheduled") {
+              data.scheduler.enabled = false;
+              runSummary.stopReason = `${accErr}（已自动暂停后台定时检查，避免反复触碰延长冷却；在微信读书解除验证后可重新开启定时）`;
+            }
           }
           break;
         }
