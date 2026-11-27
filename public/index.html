@@ -3,463 +3,450 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>微信公众号文章采集与清洗工作台 · 微信读书全量 + 搜号订阅版</title>
+  <title>公众号采集 · 微信文章工作台</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
+  <a class="skip-link" href="#mainWorkspace">跳到工作区</a>
   <div class="app-shell">
-    <!-- Top Header -->
-    <header class="topbar">
+    <aside class="sidebar">
       <div class="brand">
-        <div class="brand-icon" aria-hidden="true">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <path d="M9 15l2 2 4-4"/>
-          </svg>
-        </div>
-        <div class="brand-text">
-          <div class="brand-title-row">
-            <h1>微信公众号文章采集与清洗工作台</h1>
-            <span class="badge badge-teal">v2.4 · 全量历史 + 搜号 + CLI + 群聊日报推送</span>
-          </div>
-          <p class="brand-sub" id="outputDirLabel">归档目录：加载中...</p>
-        </div>
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <div class="brand-name">微信文章工作台</div>
       </div>
-
-      <div class="topbar-status">
-        <button type="button" class="status-pill" id="pillWeReadStatus" title="点击打开微信读书扫码窗口或刷新登录态">
-          <span class="dot dot-off" id="wereadStatusDot"></span>
-          <span id="wereadStatusText">微信读书：未登录</span>
+      <nav class="site-nav" aria-label="工作区">
+        <button type="button" class="nav-item active" id="tabLog" aria-current="page">
+          <span class="nav-icon icon-capture" aria-hidden="true"></span><span>公众号采集</span>
         </button>
-        <button type="button" class="status-pill" id="pillSubStatus" title="管理多公众号自动订阅更新">
-          <span class="dot dot-emerald" id="subStatusDot"></span>
-          <span id="subStatusText">订阅 0 个号</span>
+        <button type="button" class="nav-item" id="tabArchive">
+          <span class="nav-icon icon-archive" aria-hidden="true"></span><span>文章归档</span><span class="nav-count" id="archivedCountTab">0</span>
         </button>
-        <button type="button" class="status-pill" id="pillArchiveBtn" title="查看已归档文章库">
-          <span class="dot dot-emerald"></span>
-          <span>已归档 <strong id="archivedCountTop">0</strong> 篇</span>
+        <button type="button" class="nav-item" id="tabSubs">
+          <span class="nav-icon icon-subscribe" aria-hidden="true"></span><span>公众号订阅</span><span class="nav-count" id="subCountTab">0</span>
         </button>
-        <div class="status-pill" id="pillMcpStatus" title="本地 Streamable HTTP MCP 服务状态">
-          <span class="dot dot-pulse" id="mcpStatusDot"></span>
-          <span id="mcpStatusText">MCP 运行中</span>
+        <button type="button" class="nav-item" id="tabPush">
+          <span class="nav-icon icon-push" aria-hidden="true"></span><span>群聊推送</span><span class="nav-count" id="pushCountTab">0</span>
+        </button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="connection-state" id="pillMcpStatus" title="本地 MCP 服务状态">
+          <span class="dot dot-off" id="mcpStatusDot"></span><span id="mcpStatusText">正在连接 MCP</span>
         </div>
-      </div>
-    </header>
-
-    <!-- Section 1: Channel Switch + Input + 2x3 Action Grid -->
-    <section class="card hero-card">
-      <!-- Channel Selector Bar -->
-      <div class="channel-bar">
-        <div class="channel-switch" role="tablist" aria-label="采集通道切换">
-          <button type="button" class="channel-btn active" id="btnChannelWeRead" role="tab" aria-selected="true">
-            <span class="channel-dot dot-idle" id="dotChannelWeRead"></span>
-            <span>微信读书通道（全量历史 · 推荐）</span>
-          </button>
-          <button type="button" class="channel-btn" id="btnChannelPublic" role="tab" aria-selected="false">
-            <span>公开链接直抓（单篇 / 合集）</span>
-          </button>
-        </div>
-
-        <div class="channel-meta" id="wereadChannelMeta">
-          <span class="channel-hint" id="wereadHintText">独立 Edge 窗口扫码登录一次，Cookie 持久化保存，零依赖直连全量历史</span>
-          <button type="button" class="mini-btn" id="btnRefreshWeRead">刷新登录态</button>
-        </div>
-      </div>
-
-      <div class="hero-grid">
-        <!-- Left Input Area -->
-        <div class="input-panel">
-          <div class="panel-label-row">
-            <label for="urlInput" class="section-label" id="inputSectionLabel">公众号名 / ID / 链接（自动换算 MP_WXS_...）</label>
-            <div class="inline-actions">
-              <button type="button" class="mini-btn mini-btn-indigo" id="btnSearchMpAccount" title="通过个人公众号后台按名称搜索任意公众号并换算为 MP_WXS_...">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                搜公众号名
-              </button>
-              <button type="button" class="mini-btn mini-btn-accent" id="btnQuickSubscribe" title="将输入框中的公众号一键加入定时订阅列表">
-                + 订阅此号
-              </button>
-              <button type="button" class="mini-btn" id="btnImportFile">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                导入清单
-              </button>
-              <button type="button" class="mini-btn" id="btnPaste">粘贴</button>
-              <button type="button" class="mini-btn mini-btn-ghost" id="btnClearInput">清空</button>
-              <input type="file" id="fileImportInput" accept=".txt,.md,.csv,.tsv,.json" hidden />
-            </div>
-          </div>
-
-          <div class="textarea-wrap" id="dropZone">
-            <textarea
-              id="urlInput"
-              rows="4"
-              spellcheck="false"
-              placeholder="提示：粘贴任意一篇该公众号文章链接、含 __biz 的合集链接，或直接输入 MP_WXS_1234567890（也可点击下方快捷公众号标签）"
-            ></textarea>
-            <div class="textarea-footer">
-              <span class="hint-text" id="urlCounter">已识别 0 个公众号 ID · 0 条文章链接</span>
-              <span class="hint-text subtle" id="inputFooterTip">支持单篇链接自动换算全量历史 · 断点续传去重</span>
-            </div>
-          </div>
-
-          <!-- Saved WeRead accounts quick-select chips -->
-          <div class="saved-accounts-row hidden" id="savedAccountsRow">
-            <span class="saved-label">已识别公众号：</span>
-            <div class="quick-chips" id="savedAccountChips"></div>
-          </div>
-        </div>
-
-        <!-- Right 2x3 Action Button Grid -->
-        <div class="action-grid" role="group" aria-label="主要操作按钮">
-          <button type="button" class="btn btn-weread" id="btnPrimaryLeft">
-            <svg id="btnPrimaryLeftIcon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-            <span id="btnPrimaryLeftLabel">登录微信读书</span>
-          </button>
-
-          <button type="button" class="btn btn-secondary" id="btnParseInputs">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <span id="btnParseInputsLabel">1.获取公众号目录</span>
-          </button>
-
-          <button type="button" class="btn btn-primary" id="btnBatchDownload">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            <span>2.批量下载清洗</span>
-          </button>
-
-          <button type="button" class="btn btn-secondary" id="btnOpenDir">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-            <span>打开下载目录</span>
-          </button>
-
-          <button type="button" class="btn btn-accent-soft" id="btnCleanLocalDir">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-            <span>清洗本地目录</span>
-          </button>
-
-          <button type="button" class="btn btn-secondary" id="btnExportCsv">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
-            <span>2.导出文章数据</span>
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <!-- Section 2: Download & Cleaning Settings -->
-    <section class="card settings-card">
-      <div class="settings-header-row">
-        <div class="settings-title-group">
-          <span class="section-label">下载与清洗设置</span>
-          <span class="quota-pill" id="dailyQuotaBadge" title="单日微信读书正文拉取超过约 1500 篇极易触发 -2041 安全校验，建议控制在 1200~1500 篇以内">
-            今日拉取：0 / 1200 篇（建议 ≤1500 防风控）
-          </span>
-        </div>
-        <label class="switch-control" for="optDarkMode">
+        <label class="switch-control theme-switch" for="optDarkMode">
           <input type="checkbox" id="optDarkMode" />
-          <span class="switch-track"><span class="switch-thumb"></span></span>
-          <span class="switch-label">打开暗黑模式</span>
+          <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          <span class="switch-label">深色模式</span>
         </label>
       </div>
+    </aside>
 
-      <!-- Row 1: Output formats -->
-      <div class="settings-row">
-        <span class="row-tag">输出格式</span>
-        <div class="check-group">
-          <label class="check-pill">
-            <input type="checkbox" id="optSaveMd" checked />
-            <span>导出MD文件</span>
-          </label>
-          <label class="check-pill">
-            <input type="checkbox" id="optIncludeYaml" checked />
-            <span>写入YAML头部</span>
-          </label>
-          <label class="check-pill">
-            <input type="checkbox" id="optSaveHtml" />
-            <span>导出纯净HTML</span>
-          </label>
-          <label class="check-pill">
-            <input type="checkbox" id="optSaveJson" />
-            <span>导出JSON数据</span>
-          </label>
-          <label class="check-pill">
-            <input type="checkbox" id="optSaveJsonl" />
-            <span>同步导出JSONL</span>
-          </label>
-        </div>
-      </div>
-
-      <!-- Row 2: Cleaning & behavior toggles -->
-      <div class="settings-row">
-        <span class="row-tag">清洗控制</span>
-        <div class="check-group">
-          <label class="check-pill">
-            <input type="checkbox" id="optDatePrefix" checked />
-            <span>文件开头添加日期</span>
-          </label>
-          <label class="check-pill">
-            <input type="checkbox" id="optDedup" checked />
-            <span>自动去重/断点续传</span>
-          </label>
-          <label class="check-pill">
-            <input type="checkbox" id="optDownloadImages" />
-            <span>本地化下载图片</span>
-          </label>
-          <label class="check-pill" id="pillDiscoverRelated">
-            <input type="checkbox" id="optDiscoverRelated" checked />
-            <span>探测合集与文内推荐</span>
-          </label>
-          <label class="check-pill">
-            <input type="checkbox" id="optOnlyOriginal" />
-            <span>只下载原创</span>
-          </label>
-          <label class="check-pill">
-            <input type="checkbox" id="optWatchClipboard" />
-            <span>自动监听剪贴板</span>
-          </label>
-          <label class="check-pill check-pill-mcp">
-            <input type="checkbox" id="optEnableMcp" checked />
-            <span>启动MCP</span>
-          </label>
-        </div>
-      </div>
-
-      <div class="divider"></div>
-
-      <!-- Row 3: Rate limit, Date Range, Thresholds -->
-      <div class="params-grid">
-        <div class="rate-col">
-          <div class="param-box">
-            <label for="optDelaySec">等待时间（秒）</label>
-            <input type="number" id="optDelaySec" min="0.8" max="60" step="0.5" value="3" />
+    <main class="main-workspace" id="mainWorkspace" tabindex="-1">
+      <section class="workspace-page" id="panelLog" aria-labelledby="captureHeading">
+        <div class="page-heading capture-heading">
+          <div>
+            <h1 id="captureHeading" tabindex="-1">公众号采集</h1>
+            <p>导入公众号或文章链接，将正文清洗并归档到本地。</p>
           </div>
-          <div class="param-box">
-            <label for="optDailyLimit" title="单日拉取超过约 1500 篇极易触发微信读书 -2041 风控校验；填 0 表示不限制">每日安全上限（0不限）</label>
-            <input type="number" id="optDailyLimit" min="0" max="5000" step="100" value="1200" />
-          </div>
+          <button type="button" class="status-pill" id="pillWeReadStatus" title="打开扫码窗口或刷新微信读书登录状态">
+            <span class="dot dot-off" id="wereadStatusDot"></span>
+            <span id="wereadStatusText">微信读书：正在检测</span>
+          </button>
         </div>
 
-        <div class="time-range-box">
-          <div class="time-range-top">
-            <span class="param-title">选择时间</span>
-            <div class="radio-group" role="radiogroup" aria-label="选择时间范围">
-              <label class="radio-pill"><input type="radio" name="timeMode" value="all" checked /><span>全部</span></label>
-              <label class="radio-pill"><input type="radio" name="timeMode" value="today" /><span>当天</span></label>
-              <label class="radio-pill"><input type="radio" name="timeMode" value="month" /><span>一个月内</span></label>
-              <label class="radio-pill"><input type="radio" name="timeMode" value="year" /><span>一年内</span></label>
-              <label class="radio-pill"><input type="radio" name="timeMode" value="custom" /><span>自定义</span></label>
+        <div class="capture-layout">
+          <div class="capture-main">
+            <section class="card composer" aria-labelledby="composerHeading">
+              <div class="composer-heading">
+                <h2 id="composerHeading">新建采集</h2>
+                <div class="channel-switch" role="group" aria-label="采集来源">
+                  <button type="button" class="channel-btn active" id="btnChannelWeRead" aria-pressed="true">
+                    <span class="channel-dot dot-idle" id="dotChannelWeRead"></span>
+                    公众号历史
+                  </button>
+                  <button type="button" class="channel-btn" id="btnChannelPublic" aria-pressed="false">公开链接</button>
+                </div>
+              </div>
+              <div class="composer-body">
+                <div class="panel-label-row">
+                  <label for="urlInput" id="inputSectionLabel">公众号名、ID 或链接</label>
+                  <div class="inline-actions">
+                    <button type="button" class="mini-btn mini-btn-accent" id="btnSearchMpAccount">搜索公众号</button>
+                    <button type="button" class="mini-btn mini-btn-ghost" id="btnQuickSubscribe">加入订阅</button>
+                  </div>
+                </div>
+
+                <div class="textarea-wrap" id="dropZone">
+                  <textarea id="urlInput" rows="5" spellcheck="false" aria-describedby="inputFooterTip"
+                    placeholder="每行输入一个公众号名、公众号 ID 或文章链接"></textarea>
+                  <div class="textarea-footer">
+                    <span id="urlCounter" role="status">已识别 0 个公众号 ID</span>
+                    <div class="inline-actions">
+                      <button type="button" class="mini-btn mini-btn-ghost" id="btnImportFile">导入清单</button>
+                      <button type="button" class="mini-btn mini-btn-ghost" id="btnPaste">粘贴</button>
+                      <button type="button" class="mini-btn mini-btn-ghost" id="btnClearInput">清空</button>
+                      <input type="file" id="fileImportInput" accept=".txt,.md,.csv,.tsv,.json" hidden />
+                    </div>
+                  </div>
+                </div>
+                <p class="input-tip" id="inputFooterTip">支持批量输入，或将 TXT、CSV、JSON 等清单拖入输入框。</p>
+                <div class="saved-accounts-row hidden" id="savedAccountsRow">
+                  <span class="saved-label">已识别公众号</span>
+                  <div class="quick-chips" id="savedAccountChips"></div>
+                </div>
+              </div>
+
+              <div class="composer-footer">
+                <button type="button" class="btn btn-weread" id="btnPrimaryLeft">
+                  <svg id="btnPrimaryLeftIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+                  <span id="btnPrimaryLeftLabel">登录微信读书</span>
+                </button>
+                <div class="capture-actions">
+                  <button type="button" class="btn btn-secondary" id="btnParseInputs"><span id="btnParseInputsLabel">获取公众号目录</span></button>
+                  <button type="button" class="btn btn-primary" id="btnBatchDownload">
+                    <span class="action-arrow" aria-hidden="true">↓</span><span>批量下载与清洗</span>
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <div class="channel-meta" id="wereadChannelMeta">
+              <span class="channel-hint" id="wereadHintText">使用微信扫码登录后，即可获取公众号历史目录。</span>
+              <button type="button" class="mini-btn mini-btn-ghost" id="btnRefreshWeRead">刷新登录状态</button>
+            </div>
+
+            <details class="card settings-card" id="downloadSettings">
+              <summary class="settings-summary">
+                <h2>下载与清洗设置</h2>
+                <span class="quota-pill" id="dailyQuotaBadge">今日拉取 0 / 1200 篇</span>
+                <span class="chevron" aria-hidden="true"></span>
+              </summary>
+              <div class="settings-content">
+                <!-- Row 1: Output formats -->
+                <div class="settings-row">
+                  <span class="row-tag">输出格式</span>
+                  <div class="check-group">
+                    <label class="check-pill">
+                      <input type="checkbox" id="optSaveMd" checked />
+                      <span>Markdown</span>
+                    </label>
+                    <label class="check-pill">
+                      <input type="checkbox" id="optIncludeYaml" checked />
+                      <span>写入 YAML 头部</span>
+                    </label>
+                    <label class="check-pill">
+                      <input type="checkbox" id="optSaveHtml" />
+                      <span>纯净 HTML</span>
+                    </label>
+                    <label class="check-pill">
+                      <input type="checkbox" id="optSaveJson" />
+                      <span>JSON</span>
+                    </label>
+                    <label class="check-pill">
+                      <input type="checkbox" id="optSaveJsonl" />
+                      <span>JSONL</span>
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Row 2: Cleaning & behavior toggles -->
+                <div class="settings-row">
+                  <span class="row-tag">清洗控制</span>
+                  <div class="check-group">
+                    <label class="check-pill">
+                      <input type="checkbox" id="optDatePrefix" checked />
+                      <span>文件开头添加日期</span>
+                    </label>
+                    <label class="check-pill">
+                      <input type="checkbox" id="optDedup" checked />
+                      <span>自动去重/断点续传</span>
+                    </label>
+                    <label class="check-pill">
+                      <input type="checkbox" id="optDownloadImages" />
+                      <span>本地化下载图片</span>
+                    </label>
+                    <label class="check-pill" id="pillDiscoverRelated">
+                      <input type="checkbox" id="optDiscoverRelated" checked />
+                      <span>探测合集与文内推荐</span>
+                    </label>
+                    <label class="check-pill">
+                      <input type="checkbox" id="optOnlyOriginal" />
+                      <span>只下载原创</span>
+                    </label>
+                    <label class="check-pill">
+                      <input type="checkbox" id="optWatchClipboard" />
+                      <span>自动监听剪贴板</span>
+                    </label>
+                    <label class="check-pill check-pill-mcp">
+                      <input type="checkbox" id="optEnableMcp" checked />
+                      <span>启用 MCP</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Row 3: Rate limit, Date Range, Thresholds -->
+                <div class="params-grid">
+                  <div class="rate-col">
+                    <div class="param-box">
+                      <label for="optDelaySec">等待时间（秒）</label>
+                      <input type="number" id="optDelaySec" min="0.8" max="60" step="0.5" value="3" />
+                    </div>
+                    <div class="param-box">
+                      <label for="optDailyLimit" title="单日拉取超过约 1500 篇极易触发微信读书 -2041 风控校验；填 0 表示不限制">每日安全上限（0不限）</label>
+                      <input type="number" id="optDailyLimit" min="0" max="5000" step="100" value="1200" />
+                    </div>
+                  </div>
+
+                  <div class="time-range-box">
+                    <div class="time-range-top">
+                      <span class="param-title">选择时间</span>
+                      <div class="radio-group" role="radiogroup" aria-label="选择时间范围">
+                        <label class="radio-pill"><input type="radio" name="timeMode" value="all" checked /><span>全部</span></label>
+                        <label class="radio-pill"><input type="radio" name="timeMode" value="today" /><span>当天</span></label>
+                        <label class="radio-pill"><input type="radio" name="timeMode" value="month" /><span>一个月内</span></label>
+                        <label class="radio-pill"><input type="radio" name="timeMode" value="year" /><span>一年内</span></label>
+                        <label class="radio-pill"><input type="radio" name="timeMode" value="custom" /><span>自定义</span></label>
+                      </div>
+                    </div>
+                    <div class="custom-date-row" id="customDateRow">
+                      <input type="date" id="optDateFrom" aria-label="开始日期" value="2024-01-01" disabled />
+                      <span class="tilde">~</span>
+                      <input type="date" id="optDateTo" aria-label="结束日期" value="2026-11-23" disabled />
+                    </div>
+                  </div>
+
+                  <div class="thresholds-grid">
+                    <div class="param-box">
+                      <label for="optMinReads">下载超过阅读量</label>
+                      <input type="number" id="optMinReads" min="0" max="1000000" step="500" value="0" />
+                    </div>
+                    <div class="param-box">
+                      <label for="optStartPage">开始下载页数</label>
+                      <input type="number" id="optStartPage" min="1" max="200" step="1" value="1" />
+                    </div>
+                    <div class="param-box">
+                      <label for="optMinWords">最少字数过滤</label>
+                      <input type="number" id="optMinWords" min="0" max="50000" step="50" value="0" />
+                    </div>
+                    <div class="param-box">
+                      <label for="optMaxArticles">单次最大篇数</label>
+                      <input type="number" id="optMaxArticles" min="1" max="1000" step="10" value="200" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <aside class="card archive-overview" aria-labelledby="overviewHeading">
+            <div class="overview-header">
+              <h2 id="overviewHeading">本地归档</h2>
+              <p id="outputDirLabel" class="archive-path">正在读取归档位置</p>
+            </div>
+            <button type="button" class="overview-stat" id="pillArchiveBtn">
+              <span class="overview-value"><strong id="archivedCountTop">0</strong><span>篇</span></span>
+              <span class="overview-link">查看文章归档 <span aria-hidden="true">↗</span></span>
+            </button>
+            <button type="button" class="overview-sub" id="pillSubStatus">
+              <span class="dot dot-off" id="subStatusDot"></span><span id="subStatusText">订阅 0 个号</span>
+              <span class="overview-sub-arrow" aria-hidden="true">›</span>
+            </button>
+            <div class="overview-actions">
+              <button type="button" class="mini-btn" id="btnOpenDir">打开归档目录</button>
+              <button type="button" class="mini-btn" id="btnCleanLocalDir">清洗本地目录</button>
+              <button type="button" class="mini-btn" id="btnExportCsv">导出文章数据</button>
+            </div>
+          </aside>
+        </div>
+
+        <section class="card log-panel" aria-labelledby="logHeading">
+          <div class="log-heading">
+            <h2 id="logHeading">运行日志</h2>
+            <div class="workspace-tools">
+              <div class="progress-wrap hidden" id="progressWrap">
+                <div class="progress-bar" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
+                <span class="progress-text" role="status" id="progressText">0/0</span>
+              </div>
+              <button type="button" class="mini-btn mini-btn-danger hidden" id="btnCancelJob">停止任务</button>
+              <button type="button" class="mini-btn mini-btn-accent hidden" id="btnSyncParsedWeRead">直接下载本次目录</button>
+              <button type="button" class="mini-btn hidden" id="btnFillParsedUrls">填入解析链接</button>
+              <button type="button" class="mini-btn hidden" id="btnExportParsedCsv">导出解析清单CSV</button>
+              <button type="button" class="mini-btn" id="btnCopyMcp">复制 MCP 配置</button>
+              <button type="button" class="mini-btn mini-btn-ghost" id="btnClearLog">清空日志</button>
             </div>
           </div>
-          <div class="custom-date-row" id="customDateRow">
-            <input type="date" id="optDateFrom" value="2024-01-01" disabled />
-            <span class="tilde">~</span>
-            <input type="date" id="optDateTo" value="2026-11-23" disabled />
-          </div>
-        </div>
-
-        <div class="thresholds-grid">
-          <div class="param-box">
-            <label for="optMinReads">下载超过阅读量</label>
-            <input type="number" id="optMinReads" min="0" max="1000000" step="500" value="0" />
-          </div>
-          <div class="param-box">
-            <label for="optStartPage">开始下载页数</label>
-            <input type="number" id="optStartPage" min="1" max="200" step="1" value="1" />
-          </div>
-          <div class="param-box">
-            <label for="optMinWords">最少字数过滤</label>
-            <input type="number" id="optMinWords" min="0" max="50000" step="50" value="0" />
-          </div>
-          <div class="param-box">
-            <label for="optMaxArticles">单次最大篇数</label>
-            <input type="number" id="optMaxArticles" min="1" max="1000" step="10" value="200" />
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Section 3: Live Logs & Cleaned Archive Explorer -->
-    <section class="card workspace-card">
-      <div class="workspace-header">
-        <div class="tabs" role="tablist">
-          <button type="button" class="tab-btn active" id="tabLog" role="tab" aria-selected="true">
-            运行日志
-          </button>
-          <button type="button" class="tab-btn" id="tabSubs" role="tab" aria-selected="false">
-            公众号订阅 <span class="tab-count" id="subCountTab">0</span>
-          </button>
-          <button type="button" class="tab-btn" id="tabPush" role="tab" aria-selected="false">
-            群聊推送与日报 <span class="tab-count" id="pushCountTab">0</span>
-          </button>
-          <button type="button" class="tab-btn" id="tabArchive" role="tab" aria-selected="false">
-            已归档文章库 <span class="tab-count" id="archivedCountTab">0</span>
-          </button>
-        </div>
-
-        <div class="workspace-tools">
-          <div class="progress-wrap hidden" id="progressWrap">
-            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-            <span class="progress-text" id="progressText">0/0</span>
-          </div>
-          <button type="button" class="mini-btn mini-btn-danger hidden" id="btnCancelJob">停止任务</button>
-          <button type="button" class="mini-btn mini-btn-accent hidden" id="btnSyncParsedWeRead">直接下载本次目录</button>
-          <button type="button" class="mini-btn hidden" id="btnFillParsedUrls">填入解析链接</button>
-          <button type="button" class="mini-btn hidden" id="btnExportParsedCsv">导出解析清单CSV</button>
-          <button type="button" class="mini-btn" id="btnCopyMcp">复制 MCP 配置</button>
-          <button type="button" class="mini-btn mini-btn-ghost" id="btnClearLog">清空日志</button>
-        </div>
-      </div>
-
-      <!-- Tab Panel 1: Terminal Log -->
-      <div class="tab-panel" id="panelLog">
-        <div class="log-console" id="logConsole" aria-live="polite"></div>
-      </div>
+          <div class="log-console" id="logConsole" role="log" aria-labelledby="logHeading" tabindex="0"></div>
+        </section>
+      </section>
 
       <!-- Tab Panel 2: Multi-Account Subscriptions -->
-      <div class="tab-panel hidden" id="panelSubs">
-        <div class="sub-toolbar">
-          <div class="sub-toolbar-left">
-            <label class="switch-control" for="optSubAutoEnabled">
-              <input type="checkbox" id="optSubAutoEnabled" checked />
-              <span class="switch-track"><span class="switch-thumb"></span></span>
-              <span class="switch-label">定时自动更新</span>
-            </label>
-            <select id="optSubInterval" class="control-select sub-interval-select" title="自动检查频率">
-              <option value="15">每 15 分钟</option>
-              <option value="30">每 30 分钟</option>
-              <option value="60" selected>每 1 小时</option>
-              <option value="120">每 2 小时</option>
-              <option value="360">每 6 小时</option>
-              <option value="720">每 12 小时</option>
-              <option value="1440">每天一次</option>
-            </select>
-            <span class="sub-next-run" id="subNextRunInfo">下次自动检查：计算中...</span>
+      <section class="workspace-page hidden" id="panelSubs" aria-labelledby="subsHeading">
+        <div class="page-heading">
+          <h1 id="subsHeading" tabindex="-1">公众号订阅</h1>
+          <p>跟踪已添加的公众号，定时检查更新并归档新文章。</p>
+        </div>
+        <div class="card data-panel">
+          <div class="sub-toolbar">
+            <div class="sub-toolbar-left">
+              <label class="switch-control" for="optSubAutoEnabled">
+                <input type="checkbox" id="optSubAutoEnabled" checked />
+                <span class="switch-track"><span class="switch-thumb"></span></span>
+                <span class="switch-label">定时自动更新</span>
+              </label>
+              <select id="optSubInterval" aria-label="自动检查频率" class="control-select sub-interval-select" title="自动检查频率">
+                <option value="15">每 15 分钟</option>
+                <option value="30">每 30 分钟</option>
+                <option value="60" selected>每 1 小时</option>
+                <option value="120">每 2 小时</option>
+                <option value="360">每 6 小时</option>
+                <option value="720">每 12 小时</option>
+                <option value="1440">每天一次</option>
+              </select>
+              <span class="sub-next-run" id="subNextRunInfo">下次自动检查：计算中...</span>
+            </div>
+            <div class="sub-toolbar-right">
+              <button type="button" class="mini-btn mini-btn-accent" id="btnOpenAddSubModal">+ 添加订阅</button>
+              <button type="button" class="mini-btn mini-btn-primary" id="btnSyncAllSubs">检查全部更新</button>
+            </div>
           </div>
-          <div class="sub-toolbar-right">
-            <button type="button" class="mini-btn mini-btn-accent" id="btnOpenAddSubModal">+ 添加订阅（支持多号）</button>
-            <button type="button" class="mini-btn mini-btn-primary" id="btnSyncAllSubs">立即检查全部更新</button>
+
+          <div class="archive-table-wrap" tabindex="0" role="region" aria-label="管理列表，可横向滚动">
+            <table class="archive-table">
+              <thead>
+                <tr>
+                  <th style="width: 62px;">启用</th>
+                  <th style="width: 220px;">公众号 / bookId</th>
+                  <th>最新已同步文章</th>
+                  <th style="width: 72px; text-align: right;">已归档</th>
+                  <th style="width: 175px;">上次检查 / 状态</th>
+                  <th style="width: 148px; text-align: right;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="subsTableBody">
+                <tr><td colspan="6" class="empty-cell">加载订阅列表中...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="empty-message hidden"></div>
+          <div class="sub-history-bar" id="subHistoryBar">
+            <span>暂无历史自动检查记录，点击右上角「检查全部更新」或等待定时触发。</span>
           </div>
         </div>
-
-        <div class="archive-table-wrap sub-table-wrap">
-          <table class="archive-table">
-            <thead>
-              <tr>
-                <th style="width: 62px;">启用</th>
-                <th style="width: 220px;">公众号 / bookId</th>
-                <th>最新已同步文章</th>
-                <th style="width: 72px; text-align: right;">已归档</th>
-                <th style="width: 175px;">上次检查 / 状态</th>
-                <th style="width: 148px; text-align: right;">操作</th>
-              </tr>
-            </thead>
-            <tbody id="subsTableBody">
-              <tr><td colspan="6" class="empty-cell">加载订阅列表中...</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="sub-history-bar" id="subHistoryBar">
-          <span>暂无历史自动检查记录，点击右上角「立即检查全部更新」或等待定时触发。</span>
-        </div>
-      </div>
+      </section>
 
       <!-- Tab Panel 2.5: Multi-Channel Bot Push & Scheduled Daily Digest -->
-      <div class="tab-panel hidden" id="panelPush">
-        <div class="push-toolbar">
-          <div class="push-toolbar-left">
-            <label class="switch-control" for="optPushRealtime" title="每次订阅自动检查发现新文章后，立即推送到已启用的机器人通道">
-              <input type="checkbox" id="optPushRealtime" />
-              <span class="switch-track"><span class="switch-thumb"></span></span>
-              <span class="switch-label">新文实时推送</span>
-            </label>
-            <label class="switch-control" for="optPushDaily" title="每天在指定时间把最近收录的订阅文章汇总成一份日报自动发群">
-              <input type="checkbox" id="optPushDaily" />
-              <span class="switch-track"><span class="switch-thumb"></span></span>
-              <span class="switch-label">每日定时日报</span>
-            </label>
-            <label class="switch-control" for="optPushSyncFirst" title="推送日报前自动增量拉取一次订阅公众号最新文章，避免漏发当日新文">
-              <input type="checkbox" id="optPushSyncFirst" checked />
-              <span class="switch-track"><span class="switch-thumb"></span></span>
-              <span class="switch-label">推送前先查更新</span>
-            </label>
-            <input type="time" id="optPushDailyTime" class="control-time" value="21:00" title="每日定时推送时间（北京时间）" />
-            <select id="optPushHours" class="control-select sub-interval-select" title="日报回溯窗口">
-              <option value="24" selected>近 24 小时</option>
-              <option value="48">近 48 小时</option>
-              <option value="72">近 3 天</option>
-              <option value="168">近 7 天</option>
-            </select>
-            <select id="optPushExcerpt" class="control-select sub-interval-select" title="每篇文章附带的摘要字数">
-              <option value="160" selected>摘要 160 字</option>
-              <option value="80">摘要 80 字</option>
-              <option value="300">摘要 300 字</option>
-              <option value="0">仅发标题</option>
-            </select>
+      <section class="workspace-page hidden" id="panelPush" aria-labelledby="pushHeading">
+        <div class="page-heading">
+          <h1 id="pushHeading" tabindex="-1">群聊推送与日报</h1>
+          <p>管理推送通道，预览订阅日报和微信群转发文案。</p>
+        </div>
+        <div class="card data-panel">
+          <div class="push-toolbar">
+            <div class="push-toolbar-left">
+              <label class="switch-control" for="optPushRealtime" title="每次订阅自动检查发现新文章后，立即推送到已启用的机器人通道">
+                <input type="checkbox" id="optPushRealtime" />
+                <span class="switch-track"><span class="switch-thumb"></span></span>
+                <span class="switch-label">新文实时推送</span>
+              </label>
+              <label class="switch-control" for="optPushDaily" title="每天在指定时间把最近收录的订阅文章汇总成一份日报自动发群">
+                <input type="checkbox" id="optPushDaily" />
+                <span class="switch-track"><span class="switch-thumb"></span></span>
+                <span class="switch-label">每日定时日报</span>
+              </label>
+              <label class="switch-control" for="optPushSyncFirst" title="推送日报前自动增量拉取一次订阅公众号最新文章，避免漏发当日新文">
+                <input type="checkbox" id="optPushSyncFirst" checked />
+                <span class="switch-track"><span class="switch-thumb"></span></span>
+                <span class="switch-label">推送前先查更新</span>
+              </label>
+              <input type="time" id="optPushDailyTime" aria-label="每日推送时间（北京时间）" class="control-time" value="21:00" title="每日定时推送时间（北京时间）" />
+              <select id="optPushHours" aria-label="日报时间范围" class="control-select sub-interval-select" title="日报回溯窗口">
+                <option value="24" selected>近 24 小时</option>
+                <option value="48">近 48 小时</option>
+                <option value="72">近 3 天</option>
+                <option value="168">近 7 天</option>
+              </select>
+              <select id="optPushExcerpt" aria-label="摘要字数" class="control-select sub-interval-select" title="每篇文章附带的摘要字数">
+                <option value="160" selected>摘要 160 字</option>
+                <option value="80">摘要 80 字</option>
+                <option value="300">摘要 300 字</option>
+                <option value="0">仅发标题</option>
+              </select>
+            </div>
+            <div class="push-toolbar-right">
+              <button type="button" class="mini-btn mini-btn-indigo" id="btnPreviewDigest">预览日报</button>
+              <button type="button" class="mini-btn mini-btn-accent" id="btnOpenAddPushModal">+ 添加通道</button>
+              <button type="button" class="mini-btn mini-btn-primary" id="btnSendDigestNow">推送日报</button>
+            </div>
           </div>
-          <div class="push-toolbar-right">
-            <button type="button" class="mini-btn mini-btn-indigo" id="btnPreviewDigest">预览 / 复制微信群文案</button>
-            <button type="button" class="mini-btn mini-btn-accent" id="btnOpenAddPushModal">+ 添加推送通道</button>
-            <button type="button" class="mini-btn mini-btn-primary" id="btnSendDigestNow">立即推送日报</button>
+
+          <div class="archive-table-wrap" tabindex="0" role="region" aria-label="管理列表，可横向滚动">
+            <table class="archive-table">
+              <thead>
+                <tr>
+                  <th style="width: 60px;">启用</th>
+                  <th style="width: 210px;">通道名称 / 平台</th>
+                  <th>目标地址（已脱敏，本地保存）</th>
+                  <th style="width: 175px;">最近发送 / 状态</th>
+                  <th style="width: 155px; text-align: right;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="pushTableBody">
+                <tr><td colspan="5" class="empty-cell">加载推送通道配置中...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="empty-message hidden"></div>
+          <div class="sub-history-bar" id="pushHistoryBar">
+            <span>支持企业微信群、飞书群、钉钉群、WxPusher（推个人微信）与自定义 Webhook；所有密钥仅保存在本地 data/push-config.json。</span>
           </div>
         </div>
-
-        <div class="archive-table-wrap sub-table-wrap">
-          <table class="archive-table">
-            <thead>
-              <tr>
-                <th style="width: 60px;">启用</th>
-                <th style="width: 210px;">通道名称 / 平台</th>
-                <th>目标地址（已脱敏，本地保存）</th>
-                <th style="width: 175px;">最近发送 / 状态</th>
-                <th style="width: 155px; text-align: right;">操作</th>
-              </tr>
-            </thead>
-            <tbody id="pushTableBody">
-              <tr><td colspan="5" class="empty-cell">加载推送通道配置中...</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="sub-history-bar" id="pushHistoryBar">
-          <span>支持企业微信群、飞书群、钉钉群、WxPusher（推个人微信）与自定义 Webhook；所有密钥仅保存在本地 data/push-config.json。</span>
-        </div>
-      </div>
+      </section>
 
       <!-- Tab Panel 3: Archive Library -->
-      <div class="tab-panel hidden" id="panelArchive">
-        <div class="archive-toolbar">
-          <select id="filterAccount" class="control-select">
-            <option value="">全部公众号</option>
-          </select>
-          <input type="search" id="filterKeyword" class="control-search" placeholder="搜索文章标题、作者或文件名..." />
-          <button type="button" class="mini-btn" id="btnRefreshArchive">刷新列表</button>
+      <section class="workspace-page hidden" id="panelArchive" aria-labelledby="archiveHeading">
+        <div class="page-heading">
+          <h1 id="archiveHeading" tabindex="-1">文章归档</h1>
+          <p>按公众号或关键词查找本地文章，预览并复制 Markdown。</p>
         </div>
-        <div class="archive-table-wrap">
-          <table class="archive-table">
-            <thead>
-              <tr>
-                <th style="width: 105px;">发布日期</th>
-                <th style="width: 120px;">公众号</th>
-                <th>标题</th>
-                <th style="width: 68px; text-align: right;">字数</th>
-                <th style="width: 112px; text-align: right;">阅读 / 点赞</th>
-                <th style="width: 120px; text-align: right;">操作</th>
-              </tr>
-            </thead>
-            <tbody id="archiveTableBody">
-              <tr><td colspan="6" class="empty-cell">加载中...</td></tr>
-            </tbody>
-          </table>
+        <div class="card data-panel">
+          <div class="archive-toolbar">
+            <select id="filterAccount" aria-label="按公众号筛选" class="control-select">
+              <option value="">全部公众号</option>
+            </select>
+            <input type="search" id="filterKeyword" aria-label="搜索归档文章" class="control-search" placeholder="搜索文章标题、作者或文件名..." />
+            <button type="button" class="mini-btn" id="btnRefreshArchive">刷新列表</button>
+          </div>
+          <div class="archive-table-wrap" tabindex="0" role="region" aria-label="文章列表，可横向滚动">
+            <table class="archive-table">
+              <thead>
+                <tr>
+                  <th>标题</th>
+                  <th style="width: 120px;">公众号</th>
+                  <th style="width: 105px;">发布日期</th>
+                  <th style="width: 68px; text-align: right;">字数</th>
+                  <th style="width: 112px; text-align: right;">阅读 / 点赞</th>
+                  <th style="width: 140px; text-align: right;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="archiveTableBody">
+                <tr><td colspan="6" class="empty-cell">加载中...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="empty-message hidden"></div>
         </div>
-      </div>
-    </section>
+      </section>
+    </main>
   </div>
 
   <!-- Modal: Add / Edit Push Channel -->
-  <div class="modal-backdrop hidden" id="pushChannelModal">
-    <div class="modal-card modal-search" role="dialog" aria-modal="true" aria-labelledby="pushChannelModalTitle">
+  <dialog class="modal-backdrop" id="pushChannelModal" aria-labelledby="pushChannelModalTitle">
+    <div class="modal-card modal-search">
       <div class="modal-header">
-        <h2 id="pushChannelModalTitle">添加群聊 / 微信推送通道</h2>
+        <h2 id="pushChannelModalTitle">添加推送通道</h2>
         <button type="button" class="icon-close" id="btnClosePushModal" aria-label="关闭">&times;</button>
       </div>
       <div class="modal-body">
@@ -477,12 +464,12 @@
           </div>
           <div class="field-group">
             <label for="pushChannelName">通道名称（便于区分）</label>
-            <input type="text" id="pushChannelName" placeholder="例如：投研交流企微群" />
+            <input type="text" id="pushChannelName" autofocus placeholder="例如：投研交流企微群" />
           </div>
         </div>
 
         <div class="push-guide-box" id="pushTypeGuide">
-          在企业微信内部群右上角「添加群机器人」复制 Webhook 地址（https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...），零封号风险且自动按 4KB 分片防截断。
+          在企业微信内部群右上角「添加群机器人」复制 Webhook 地址（https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...）。
         </div>
 
         <div id="pushWebhookFields">
@@ -519,14 +506,14 @@
         <button type="button" class="btn btn-primary" id="btnSavePushChannel">保存通道</button>
       </div>
     </div>
-  </div>
+  </dialog>
 
   <!-- Modal: Daily Digest Preview & 1-Click Copy for Personal WeChat Group -->
-  <div class="modal-backdrop hidden" id="digestPreviewModal">
-    <div class="modal-card modal-digest" role="dialog" aria-modal="true" aria-labelledby="digestPreviewTitle">
+  <dialog class="modal-backdrop" id="digestPreviewModal" aria-labelledby="digestPreviewTitle">
+    <div class="modal-card modal-digest">
       <div class="modal-header">
         <div>
-          <h2 id="digestPreviewTitle">订阅日报预览 &amp; 个人微信群转发文案</h2>
+          <h2 id="digestPreviewTitle">订阅日报预览</h2>
           <p class="drawer-sub" id="digestPreviewMeta">正在生成日报预览...</p>
         </div>
         <button type="button" class="icon-close" id="btnCloseDigestModal" aria-label="关闭">&times;</button>
@@ -534,11 +521,11 @@
       <div class="modal-body">
         <div class="digest-switch-row">
           <div class="channel-switch">
-            <button type="button" class="channel-btn active" id="btnDigestFormatWx">个人微信群纯文本版（推荐复制）</button>
-            <button type="button" class="channel-btn" id="btnDigestFormatMd">群机器人 Markdown 版</button>
+            <button type="button" class="channel-btn active" id="btnDigestFormatWx" aria-pressed="true">微信群纯文本</button>
+            <button type="button" class="channel-btn" id="btnDigestFormatMd" aria-pressed="false">机器人 Markdown</button>
           </div>
           <div class="digest-window-ops">
-            <select id="digestPreviewHours" class="control-select sub-interval-select">
+            <select id="digestPreviewHours" aria-label="预览时间范围" class="control-select sub-interval-select">
               <option value="24">近 24 小时</option>
               <option value="48">近 48 小时</option>
               <option value="72">近 3 天</option>
@@ -547,7 +534,7 @@
             <button type="button" class="mini-btn" id="btnReloadDigestPreview">重新生成</button>
           </div>
         </div>
-        <textarea id="digestPreviewText" class="digest-preview-box" rows="13" readonly></textarea>
+        <textarea id="digestPreviewText" aria-label="日报预览文案" class="digest-preview-box" rows="13" readonly></textarea>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" id="btnDoneDigestModal">关闭</button>
@@ -555,13 +542,13 @@
         <button type="button" class="btn btn-primary" id="btnCopyDigestText">一键复制文案</button>
       </div>
     </div>
-  </div>
+  </dialog>
 
   <!-- Modal: Search Official Account by Name (MP Admin searchbiz -> MP_WXS_...) -->
-  <div class="modal-backdrop hidden" id="mpSearchModal">
-    <div class="modal-card modal-search" role="dialog" aria-modal="true" aria-labelledby="mpSearchModalTitle">
+  <dialog class="modal-backdrop" id="mpSearchModal" aria-labelledby="mpSearchModalTitle">
+    <div class="modal-card modal-search">
       <div class="modal-header">
-        <h2 id="mpSearchModalTitle">按公众号名称搜索 &amp; 换算 MP_WXS_...</h2>
+        <h2 id="mpSearchModalTitle">搜索公众号</h2>
         <button type="button" class="icon-close" id="btnCloseMpSearchModal" aria-label="关闭">&times;</button>
       </div>
       <div class="modal-body">
@@ -580,6 +567,8 @@
           <input
             type="search"
             id="mpSearchQueryInput"
+            autofocus
+            aria-label="公众号名称"
             class="mp-search-input"
             placeholder="输入公众号名称，例如：人民日报、晚点LatePost、第一财经..."
           />
@@ -598,11 +587,11 @@
         <button type="button" class="btn btn-secondary" id="btnDoneMpSearchModal">关闭</button>
       </div>
     </div>
-  </div>
+  </dialog>
 
   <!-- Modal: WeRead / MP Admin QR Login -->
-  <div class="modal-backdrop hidden" id="wereadLoginModal">
-    <div class="modal-card modal-qr" role="dialog" aria-modal="true" aria-labelledby="wereadLoginModalTitle">
+  <dialog class="modal-backdrop" id="wereadLoginModal" aria-labelledby="wereadLoginModalTitle">
+    <div class="modal-card modal-qr">
       <div class="modal-header">
         <h2 id="wereadLoginModalTitle">微信扫码登录微信读书</h2>
         <button type="button" class="icon-close" id="btnCloseWeReadModal" aria-label="关闭">&times;</button>
@@ -625,13 +614,13 @@
         <button type="button" class="btn btn-primary" id="btnDoneWeReadModal">关闭窗口</button>
       </div>
     </div>
-  </div>
+  </dialog>
 
   <!-- Modal: Add Multi-Account Subscriptions -->
-  <div class="modal-backdrop hidden" id="addSubModal">
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="addSubModalTitle">
+  <dialog class="modal-backdrop" id="addSubModal" aria-labelledby="addSubModalTitle">
+    <div class="modal-card">
       <div class="modal-header">
-        <h2 id="addSubModalTitle">添加公众号订阅（支持批量多号）</h2>
+        <h2 id="addSubModalTitle">添加公众号订阅</h2>
         <button type="button" class="icon-close" id="btnCloseAddSubModal" aria-label="关闭">&times;</button>
       </div>
       <div class="modal-body">
@@ -642,6 +631,7 @@
           <label for="addSubRawInput">公众号链接或 bookId（支持多行同时添加多个公众号）</label>
           <textarea
             id="addSubRawInput"
+            autofocus
             rows="4"
             class="modal-textarea"
             spellcheck="false"
@@ -664,13 +654,13 @@
         <button type="button" class="btn btn-primary" id="btnConfirmAddSub">确认加入订阅</button>
       </div>
     </div>
-  </div>
+  </dialog>
 
   <!-- Modal: Clean Local Directory -->
-  <div class="modal-backdrop hidden" id="cleanDirModal">
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="cleanDirModalTitle">
+  <dialog class="modal-backdrop" id="cleanDirModal" aria-labelledby="cleanDirModalTitle">
+    <div class="modal-card">
       <div class="modal-header">
-        <h2 id="cleanDirModalTitle">深度清洗本地导出目录</h2>
+        <h2 id="cleanDirModalTitle">清洗本地目录</h2>
         <button type="button" class="icon-close" id="btnCloseCleanModal" aria-label="关闭">&times;</button>
       </div>
       <div class="modal-body">
@@ -679,7 +669,7 @@
         </p>
         <div class="field-group">
           <label for="cleanDirPathInput">本地目录绝对路径</label>
-          <input type="text" id="cleanDirPathInput" placeholder="例如：C:\Downloads\某公众号导出目录" />
+          <input type="text" id="cleanDirPathInput" autofocus placeholder="例如：C:\Downloads\某公众号导出目录" />
         </div>
         <div class="quick-chips" id="localDirSuggestions"></div>
         <div class="field-group">
@@ -692,10 +682,10 @@
         <button type="button" class="btn btn-primary" id="btnConfirmCleanDir">开始深度清洗</button>
       </div>
     </div>
-  </div>
+  </dialog>
 
   <!-- Drawer: Markdown Article Preview -->
-  <div class="drawer-backdrop hidden" id="previewDrawer">
+  <dialog class="drawer-backdrop" id="previewDrawer" aria-labelledby="previewTitle">
     <div class="drawer-panel">
       <div class="drawer-header">
         <div>
@@ -707,12 +697,12 @@
           <button type="button" class="icon-close" id="btnClosePreview" aria-label="关闭">&times;</button>
         </div>
       </div>
-      <pre class="preview-code" id="previewContent"></pre>
+      <pre class="preview-code" id="previewContent" tabindex="0" aria-label="Markdown 正文"></pre>
     </div>
-  </div>
+  </dialog>
 
   <!-- Toast Container -->
-  <div class="toast-container" id="toastContainer"></div>
+  <div class="toast-container" id="toastContainer" role="status"></div>
 
   <script type="module" src="./app.js"></script>
 </body>
