@@ -1,7 +1,4 @@
-/**
- * Frontend controller for WeChat Article Cleaner Workstation v2.2
- * WeRead Full History Channel (Edge CDP) + MP Admin Account Search Helper (searchbiz) + Public Link Direct Fetch
- */
+/** Interaction controller for the WeChat article workbench. */
 const $ = (id) => document.getElementById(id);
 
 const state = {
@@ -15,6 +12,7 @@ const state = {
   wereadStatus: null,
   mpAdminStatus: null,
   qrModalMode: "weread", // "weread" | "mp_admin"
+  qrDialogAttempt: 0,
   loginPollTimer: null,
   activeJobId: null,
   activeEventSource: null,
@@ -32,6 +30,11 @@ const state = {
   digestPreviewFormat: "wx", // "wx" | "md"
   activeTab: "log",
 };
+
+function openDialog(id) {
+  const dialog = $(id);
+  if (!dialog.open) dialog.showModal();
+}
 
 function nowTimeStr() {
   const d = new Date();
@@ -191,14 +194,14 @@ function renderDailyQuota(q) {
   el.classList.remove("quota-warn", "quota-over");
   el.title = "单日微信读书正文拉取超过约 1500 篇极易触发 -2041 安全校验，建议控制在 1200~1500 篇以内";
   if (limit > 0) {
-    el.textContent = `今日拉取：${used} / ${limit} 篇（建议每日 ≤ 1200~1500 防 -2041 风控）`;
+    el.textContent = `今日拉取 ${used} / ${limit} 篇`;
     if (used >= limit) {
       el.classList.add("quota-over");
     } else if (used >= Math.floor(limit * 0.8)) {
       el.classList.add("quota-warn");
     }
   } else {
-    el.textContent = `今日拉取：${used} 篇（未设上限 · 建议每日 ≤ 1500 防 -2041 风控）`;
+    el.textContent = `今日拉取 ${used} 篇（未设上限）`;
     if (used >= 1200) el.classList.add("quota-warn");
   }
 }
@@ -299,20 +302,19 @@ function renderAuthStatusBar() {
     dot.className = "dot dot-pulse";
     const who = st.userName ? ` (${st.userName})` : st.vid ? ` (ID:${st.vid})` : "";
     text.textContent = `微信读书：已登录${who}`;
-    hint.textContent = `已连接 ${st.browserName || "Edge"} 持久化会话，可直接全量解析与下载清洗`;
-    if (state.qrModalMode === "weread") stopLoginPolling();
+    hint.textContent = `已连接 ${st.browserName || "Edge"}，可以获取公众号历史目录。`;
   } else if (st.browserRunning) {
     dot.className = "dot dot-amber";
     text.textContent = st.expired ? "微信读书：登录过期" : "微信读书：等待扫码";
     hint.textContent = st.expired
       ? "登录态已过期，请在弹出的 Edge 窗口中重新微信扫码"
-      : "请在弹出的 Edge 窗口中完成微信扫码，扫码后页面会自动识别登录状态";
+      : "请在弹出的 Edge 窗口中完成微信扫码。";
   } else {
     dot.className = "dot dot-off";
     text.textContent = st.profileExists ? "微信读书：待唤醒(已有档案)" : "微信读书：未登录";
     hint.textContent = st.profileExists
-      ? "本地已有登录档案，点击「登录微信读书」或直接「获取公众号目录」将自动唤醒独立 Edge"
-      : "点击「登录微信读书」拉起独立 Edge 窗口微信扫码一次，Cookie 自动持久化";
+      ? "已有本地登录档案，获取目录时会唤醒独立 Edge 窗口。"
+      : "使用微信扫码登录后，即可获取公众号历史目录。";
   }
 }
 
@@ -359,34 +361,34 @@ function applyChannelUi(channel) {
   const isWeRead = valid === "weread";
 
   $("btnChannelWeRead").classList.toggle("active", isWeRead);
-  $("btnChannelWeRead").setAttribute("aria-selected", String(isWeRead));
+  $("btnChannelWeRead").setAttribute("aria-pressed", String(isWeRead));
 
   $("btnChannelPublic").classList.toggle("active", !isWeRead);
-  $("btnChannelPublic").setAttribute("aria-selected", String(!isWeRead));
+  $("btnChannelPublic").setAttribute("aria-pressed", String(!isWeRead));
 
   $("wereadChannelMeta").classList.toggle("hidden", !isWeRead);
   $("pillDiscoverRelated").classList.toggle("hidden", isWeRead);
 
   if (isWeRead) {
-    $("inputSectionLabel").textContent = "公众号名 / ID / 链接（自动换算 MP_WXS_...）";
+    $("inputSectionLabel").textContent = "公众号名、ID 或链接";
     $("urlInput").placeholder =
-      "提示：输入公众号名称（或点右上角「搜公众号名」）、粘贴任意单篇文章/合集链接、或直接输入 MP_WXS_1234567890";
-    $("inputFooterTip").textContent = "支持公众号名/单篇链接自动换算 · 断点续传去重";
+      "每行输入一个公众号名、MP_WXS_ ID 或公众号文章链接";
+    $("inputFooterTip").textContent = "可拖入 TXT、CSV、JSON 等清单，一次导入多个公众号。";
     $("btnPrimaryLeft").className = "btn btn-weread";
     $("btnPrimaryLeftLabel").textContent = "登录微信读书";
     $("btnPrimaryLeftIcon").innerHTML =
       '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>';
-    $("btnParseInputsLabel").textContent = "1.获取公众号目录";
+    $("btnParseInputsLabel").textContent = "获取公众号目录";
   } else {
-    $("inputSectionLabel").textContent = "微信文章链接 / 合集 / 清单";
+    $("inputSectionLabel").textContent = "公开文章或合集链接";
     $("urlInput").placeholder =
-      "提示：可用换行输入多篇公开文章链接（mp.weixin.qq.com/s/...）、公开合集链接（appmsgalbum），或直接将 TXT / CSV / JSON 链接清单拖拽到此框内";
-    $("inputFooterTip").textContent = "支持拖拽导入文件 · 自动去重";
+      "每行粘贴一条 mp.weixin.qq.com 的公开文章或合集链接";
+    $("inputFooterTip").textContent = "可拖入 TXT、CSV、JSON 等链接清单。";
     $("btnPrimaryLeft").className = "btn btn-secondary";
     $("btnPrimaryLeftLabel").textContent = "文章下载";
     $("btnPrimaryLeftIcon").innerHTML =
       '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>';
-    $("btnParseInputsLabel").textContent = "1.解析合集/清单";
+    $("btnParseInputsLabel").textContent = "解析合集或清单";
   }
 
   renderAuthStatusBar();
@@ -404,7 +406,7 @@ function stopLoginPolling() {
 
 function startLoginPolling(mode = "weread") {
   stopLoginPolling();
-  state.qrModalMode = mode;
+  const attempt = state.qrDialogAttempt;
   let ticks = 0;
   state.loginPollTimer = setInterval(async () => {
     ticks++;
@@ -416,13 +418,14 @@ function startLoginPolling(mode = "weread") {
       if (mode === "mp_admin") {
         const res = await fetch("/api/mp-admin/status?probe=1");
         const st = await res.json();
+        if (!isCurrentQrDialog(attempt, mode)) return;
         renderMpAdminStatus(st);
         if (st.loggedIn) {
           stopLoginPolling();
-          $("wereadLoginModal").classList.add("hidden");
+          $("wereadLoginModal").close();
           const who = st.accountName ? `（${st.accountName}）` : "";
           appendLog(
-            `✓ 个人公众号后台扫码登录成功${who}！现在可在「搜公众号名」中直接按名称换算 MP_WXS_...。`,
+            `✓ 个人公众号后台扫码登录成功${who}！现在可在「搜索公众号」中直接按名称换算 MP_WXS_...。`,
             "ok"
           );
           showToast("公众号后台扫码成功，可以直接搜号了！");
@@ -432,12 +435,13 @@ function startLoginPolling(mode = "weread") {
       } else {
         const res = await fetch("/api/weread/status?probe=1");
         const st = await res.json();
+        if (!isCurrentQrDialog(attempt, mode)) return;
         renderWeReadStatus(st);
         if (st.loggedIn) {
           stopLoginPolling();
-          $("wereadLoginModal").classList.add("hidden");
+          $("wereadLoginModal").close();
           appendLog(
-            `✓ 微信读书扫码登录成功！当前账号：${st.userName || `vid:${st.vid}`}，现在可以点击「1.获取公众号目录」或「2.批量下载清洗」。`,
+            `✓ 微信读书扫码登录成功！当前账号：${st.userName || `vid:${st.vid}`}，现在可以点击「获取公众号目录」或「批量下载与清洗」。`,
             "ok"
           );
           showToast("微信读书扫码登录成功！");
@@ -447,6 +451,17 @@ function startLoginPolling(mode = "weread") {
   }, 2500);
 }
 
+function startQrDialog(mode) {
+  stopLoginPolling();
+  state.qrDialogAttempt++;
+  showQrModal(mode);
+  return state.qrDialogAttempt;
+}
+
+function isCurrentQrDialog(attempt, mode) {
+  return $("wereadLoginModal").open && state.qrDialogAttempt === attempt && state.qrModalMode === mode;
+}
+
 function showQrModal(mode = "weread", dataUrl = "") {
   state.qrModalMode = mode;
   const isMp = mode === "mp_admin";
@@ -454,8 +469,9 @@ function showQrModal(mode = "weread", dataUrl = "") {
   $("wereadQrHint").textContent = isMp
     ? "请用手机微信「扫一扫」扫描下方微信公众平台（mp.weixin.qq.com）官方二维码；扫码后在手机上选择你的个人公众号/订阅号并点击确认，工作台将在 3 秒内自动获取 token 并持久化会话。"
     : "请直接用手机微信「扫一扫」扫描下方微信读书官方登录二维码；在手机上点击确认后，工作台将在 3 秒内自动完成登录并持久化保存 Cookie。";
-  $("wereadLoginModal").classList.remove("hidden");
+  openDialog("wereadLoginModal");
   if (dataUrl) {
+    $("wereadQrImg").alt = isMp ? "公众号后台登录二维码" : "微信读书登录二维码";
     $("wereadQrImg").src = dataUrl;
     $("wereadQrImg").classList.remove("hidden");
     $("wereadQrLoading").classList.add("hidden");
@@ -473,7 +489,8 @@ function showQrModal(mode = "weread", dataUrl = "") {
 }
 
 async function handleRefreshQrImage() {
-  const mode = state.qrModalMode || "weread";
+  const mode = state.qrModalMode;
+  const attempt = state.qrDialogAttempt;
   const isMp = mode === "mp_admin";
   $("wereadQrImg").classList.add("hidden");
   $("wereadQrLoading").classList.remove("hidden");
@@ -483,10 +500,12 @@ async function handleRefreshQrImage() {
   try {
     const res = await fetch(isMp ? "/api/mp-admin/qr" : "/api/weread/qr");
     const data = await res.json();
+    const current = isCurrentQrDialog(attempt, mode);
     if (data.loggedIn) {
       if (isMp) renderMpAdminStatus(data);
       else renderWeReadStatus(data);
-      $("wereadLoginModal").classList.add("hidden");
+      if (!current) return;
+      $("wereadLoginModal").close();
       appendLog(
         isMp
           ? `✓ 个人公众号后台已登录${data.accountName ? `（${data.accountName}）` : ""}`
@@ -496,6 +515,7 @@ async function handleRefreshQrImage() {
       showToast(isMp ? "公众号后台已登录！" : "微信读书已登录！");
       return;
     }
+    if (!current) return;
     if (data.qrImageDataUrl) {
       showQrModal(mode, data.qrImageDataUrl);
       showToast("二维码已刷新");
@@ -503,26 +523,30 @@ async function handleRefreshQrImage() {
       $("wereadQrLoading").textContent = "未能截取二维码，请直接在任务栏切换到 Edge 窗口扫码";
     }
   } catch (err) {
-    $("wereadQrLoading").textContent = `刷新失败：${err.message}`;
+    if (isCurrentQrDialog(attempt, mode)) {
+      $("wereadQrLoading").textContent = `刷新失败：${err.message}`;
+    }
   }
 }
 
 async function handleWeReadLogin() {
   switchTab("log");
   appendLog("正在拉起独立可见的 Edge 窗口打开 https://weread.qq.com/ 并加载微信扫码登录...", "info");
-  showQrModal("weread", "");
+  const attempt = startQrDialog("weread");
   try {
     const res = await fetch("/api/weread/login", { method: "POST" });
     const data = await res.json();
+    const current = isCurrentQrDialog(attempt, "weread");
+    if (res.ok && (current || data.loggedIn)) renderWeReadStatus(data);
+    if (!current) return;
     if (!res.ok) {
-      $("wereadLoginModal").classList.add("hidden");
+      $("wereadLoginModal").close();
       appendLog(`启动微信读书登录窗口失败：${data.error || "未知错误"}`, "err");
       showToast(data.error || "启动失败");
       return;
     }
-    renderWeReadStatus(data);
     if (data.loggedIn) {
-      $("wereadLoginModal").classList.add("hidden");
+      $("wereadLoginModal").close();
       appendLog(`✓ 检测到微信读书已处于有效登录态（${data.userName || `vid:${data.vid}`}），Cookie 目录：${data.profileDir}`, "ok");
       showToast("微信读书已登录");
     } else {
@@ -539,7 +563,7 @@ async function handleWeReadLogin() {
       startLoginPolling("weread");
     }
   } catch (err) {
-    $("wereadLoginModal").classList.add("hidden");
+    if (isCurrentQrDialog(attempt, "weread")) $("wereadLoginModal").close();
     appendLog(`连接本地微信读书登录接口失败：${err.message}`, "err");
   }
 }
@@ -547,19 +571,21 @@ async function handleWeReadLogin() {
 async function handleMpAdminLogin() {
   switchTab("log");
   appendLog("正在拉起独立可见的 Edge 窗口打开 https://mp.weixin.qq.com/ 并加载公众号后台微信扫码...", "info");
-  showQrModal("mp_admin", "");
+  const attempt = startQrDialog("mp_admin");
   try {
     const res = await fetch("/api/mp-admin/login", { method: "POST" });
     const data = await res.json();
+    const current = isCurrentQrDialog(attempt, "mp_admin");
+    if (res.ok && (current || data.loggedIn)) renderMpAdminStatus(data);
+    if (!current) return;
     if (!res.ok) {
-      $("wereadLoginModal").classList.add("hidden");
+      $("wereadLoginModal").close();
       appendLog(`启动公众号后台登录窗口失败：${data.error || "未知错误"}`, "err");
       showToast(data.error || "启动失败");
       return;
     }
-    renderMpAdminStatus(data);
     if (data.loggedIn) {
-      $("wereadLoginModal").classList.add("hidden");
+      $("wereadLoginModal").close();
       appendLog(
         `✓ 检测到个人公众号后台已处于有效登录态${data.accountName ? `（${data.accountName}）` : ""}，档案目录：${data.profileDir}`,
         "ok"
@@ -579,7 +605,7 @@ async function handleMpAdminLogin() {
       startLoginPolling("mp_admin");
     }
   } catch (err) {
-    $("wereadLoginModal").classList.add("hidden");
+    if (isCurrentQrDialog(attempt, "mp_admin")) $("wereadLoginModal").close();
     appendLog(`连接本地公众号后台登录接口失败：${err.message}`, "err");
   }
 }
@@ -639,7 +665,7 @@ async function refreshState(printBootLog = false) {
     state.localDirSuggestions = data.localDirSuggestions || [];
     state.savedWeReadAccounts = data.savedWeReadAccounts || [];
 
-    $("outputDirLabel").textContent = `归档目录：${data.outputDir}`;
+    $("outputDirLabel").textContent = data.outputDir;
     $("archivedCountTop").textContent = String(data.archivedCount || 0);
     $("archivedCountTab").textContent = String(data.archivedCount || 0);
     renderMcpStatus();
@@ -685,14 +711,9 @@ async function refreshState(printBootLog = false) {
     }
 
     if (printBootLog) {
-      appendLog("工作台已升级至 v2.4（微信读书全量 + 搜号换算 + wxclean CLI + 群聊机器人定时日报）：支持企业微信、飞书、钉钉、WxPusher（推个人微信）、自定义 Webhook 及个人微信群一键复制日报！", "ok");
-      appendLog("使用方式：① 切到「公众号订阅」批量添加要追更的博主；② 切到「群聊推送与日报」添加企微/飞书/钉钉/WxPusher 机器人并开启每日定时日报或新文实时推送。", "info");
+      appendLog("工作台已就绪。", "ok");
       if (state.mcpEnabled && state.mcpConfig) {
-        appendLog(
-          `MCP 服务已启动在 ${state.mcpUrl}（共 16 个工具，含按名称搜号、多号订阅与群聊机器人定时日报），Streamable HTTP 配置示例：`,
-          "ok",
-          JSON.stringify(state.mcpConfig.streamableHttp, null, 2)
-        );
+        appendLog("MCP 服务已启动，端点为 " + state.mcpUrl, "info");
       }
     }
   } catch (err) {
@@ -807,7 +828,7 @@ function watchJob(jobId) {
             )
             .join("\n") +
             (s.articles.length > 10
-              ? `\n... 其余 ${s.articles.length - 10} 篇（点击「直接下载本次目录」或「2.批量下载清洗」将复用此目录直接拉取正文，无需重复翻页）`
+              ? `\n... 其余 ${s.articles.length - 10} 篇（点击「直接下载本次目录」或「批量下载与清洗」将复用此目录直接拉取正文，无需重复翻页）`
               : "");
           appendLog("历史文章目录预览：", "info", preview);
         }
@@ -1026,10 +1047,9 @@ async function startWeReadSyncJob({ usePrefetched = false } = {}) {
 }
 
 function openMpSearchModal() {
-  $("mpSearchModal").classList.remove("hidden");
+  openDialog("mpSearchModal");
   renderMpAdminModalStatus();
   handleRefreshMpAdminStatus(true);
-  setTimeout(() => $("mpSearchQueryInput")?.focus(), 40);
 }
 
 function renderMpSearchResults(accounts = [], emptyMsg = "") {
@@ -1092,7 +1112,7 @@ function renderMpSearchResults(accounts = [], emptyMsg = "") {
       if (state.channel !== "weread") applyChannelUi("weread");
       $("urlInput").value = acc.bookId;
       updateUrlCounter();
-      $("mpSearchModal").classList.add("hidden");
+      $("mpSearchModal").close();
       appendLog(`已按名称换算并填入公众号：「${acc.nickname}」-> ${acc.bookId} (__biz=${acc.biz})`, "ok");
       showToast(`已填入 ${acc.nickname} (${acc.bookId})`);
       await refreshState(false);
@@ -1116,7 +1136,7 @@ function renderMpSearchResults(accounts = [], emptyMsg = "") {
       }).catch(() => {});
       const ok = await handleSubmitAddSubscriptions(acc.bookId, { category: "默认订阅" });
       if (ok) {
-        $("mpSearchModal").classList.add("hidden");
+        $("mpSearchModal").close();
         switchTab("subs");
       }
     });
@@ -1197,6 +1217,34 @@ async function handleParseInputs() {
   }
 }
 
+function showTableMessage(tbody, title, description = "", action = null) {
+  const table = tbody.closest(".archive-table-wrap");
+  const message = table.nextElementSibling;
+  table.classList.toggle("hidden", Boolean(title));
+  message.classList.toggle("hidden", !title);
+  message.replaceChildren();
+  if (!title) return;
+
+  const heading = document.createElement("p");
+  heading.className = "empty-title";
+  heading.setAttribute("role", "status");
+  heading.textContent = title;
+  message.append(heading);
+  if (description) {
+    const detail = document.createElement("p");
+    detail.textContent = description;
+    message.append(detail);
+  }
+  if (action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mini-btn mini-btn-accent";
+    button.textContent = action.label;
+    button.addEventListener("click", action.run);
+    message.append(button);
+  }
+}
+
 async function loadArchiveTable() {
   const account = $("filterAccount").value;
   const keyword = $("filterKeyword").value.trim();
@@ -1205,16 +1253,26 @@ async function loadArchiveTable() {
   try {
     const res = await fetch(`/api/articles?${params.toString()}`);
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "无法读取文章列表");
     const items = data.items || [];
     if (items.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">暂无匹配的已归档文章</td></tr>`;
+      if (account || keyword) {
+        showTableMessage(tbody, "未找到匹配的文章", "试试其他关键词，或选择全部公众号。");
+      } else {
+        showTableMessage(tbody, "还没有归档文章", "下载并清洗文章后，就可以在这里搜索和预览。", {
+          label: "前往公众号采集",
+          run: () => switchTab("log"),
+        });
+      }
       return;
     }
-    tbody.innerHTML = "";
+    showTableMessage(tbody, "");
+    tbody.replaceChildren();
     for (const a of items) {
       const tr = document.createElement("tr");
 
       const tdDate = document.createElement("td");
+      tdDate.className = "archive-date";
       tdDate.textContent = a.date || "—";
 
       const tdAcc = document.createElement("td");
@@ -1272,11 +1330,11 @@ async function loadArchiveTable() {
       }
       tdOps.appendChild(ops);
 
-      tr.append(tdDate, tdAcc, tdTitle, tdWords, tdStats, tdOps);
+      tr.append(tdTitle, tdAcc, tdDate, tdWords, tdStats, tdOps);
       tbody.appendChild(tr);
     }
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">加载失败：${err.message}</td></tr>`;
+    showTableMessage(tbody, "加载文章列表失败", err.message);
   }
 }
 
@@ -1297,7 +1355,7 @@ async function openArticlePreview(article) {
         : "";
     $("previewMeta").textContent = `${article.account} · ${article.published_at || article.date} · ${article.word_count} 字${statText} · ${article.relative_path}`;
     $("previewContent").textContent = state.previewRawText;
-    $("previewDrawer").classList.remove("hidden");
+    openDialog("previewDrawer");
   } catch (err) {
     showToast(`预览失败：${err.message}`);
   }
@@ -1329,6 +1387,7 @@ async function loadSubscriptionsTable() {
   try {
     const res = await fetch("/api/subscriptions");
     const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "无法读取订阅");
     state.subscriptionsData = data;
 
     const sch = data.scheduler || {};
@@ -1348,9 +1407,10 @@ async function loadSubscriptionsTable() {
     });
 
     if (accounts.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">暂无订阅公众号，点击右上角「+ 添加订阅（支持多号）」即可一键监控更新</td></tr>`;
+      showTableMessage(tbody, "还没有订阅公众号", "可以一次添加多个公众号，开启定时更新后，新文章会自动归档。");
     } else {
-      tbody.innerHTML = "";
+      showTableMessage(tbody, "");
+      tbody.replaceChildren();
       for (const acc of accounts) {
         const tr = document.createElement("tr");
 
@@ -1492,10 +1552,10 @@ async function loadSubscriptionsTable() {
           : "配置已持久化：data/subscriptions.json";
       histBar.append(leftSpan, rightSpan);
     } else {
-      histBar.innerHTML = `<span>暂无历史检查记录，点击右上角「立即检查全部更新」或等待定时自动触发。</span><span>配置文件：data/subscriptions.json</span>`;
+      histBar.innerHTML = `<span>暂无历史检查记录，可以手动检查全部更新，或等待下次定时检查。</span><span>配置文件：data/subscriptions.json</span>`;
     }
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-cell">加载订阅列表失败：${err.message}</td></tr>`;
+    showTableMessage(tbody, "加载订阅列表失败", err.message);
   }
 }
 
@@ -1588,7 +1648,7 @@ async function handleSubmitAddSubscriptions(rawText, { category = "默认订阅"
 
 const PUSH_TYPE_GUIDES = {
   wecom:
-    "在企业微信内部群右上角「添加群机器人」复制 Webhook 地址（https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...），零封号风险且自动按 4KB 分片防截断。",
+    "在企业微信内部群右上角「添加群机器人」复制 Webhook 地址（https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...）。",
   feishu:
     "在飞书群「设置 → 群机器人 → 添加自定义机器人」复制 Webhook（https://open.feishu.cn/open-apis/bot/v2/hook/...）；若开启了签名校验请填入 Secret。",
   dingtalk:
@@ -1634,8 +1694,7 @@ function openPushChannelModal(existing = null) {
   $("pushTopicIds").value = Array.isArray(existing?.topicIds) ? existing.topicIds.join(", ") : "";
   $("pushUids").value = Array.isArray(existing?.uids) ? existing.uids.join(", ") : "";
   syncPushModalFields();
-  $("pushChannelModal").classList.remove("hidden");
-  setTimeout(() => $("pushChannelName")?.focus(), 40);
+  openDialog("pushChannelModal");
 }
 
 function collectPushChannelModalPayload() {
@@ -1659,6 +1718,7 @@ async function loadPushConfigTable() {
   try {
     const res = await fetch("/api/push/config");
     const cfg = await res.json();
+    if (!res.ok) throw new Error(cfg.error || "无法读取推送设置");
     state.pushConfig = cfg;
 
     const s = cfg.settings || {};
@@ -1677,9 +1737,10 @@ async function loadPushConfigTable() {
     $("pushCountTab").textContent = String(channels.filter((c) => c.enabled).length);
 
     if (channels.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">尚未添加群聊/微信推送通道，点击右上角「+ 添加推送通道」（支持企微/飞书/钉钉/WxPusher），或直接点「预览 / 复制微信群文案」手动转发。</td></tr>`;
+      showTableMessage(tbody, "还没有推送通道", "添加通道可自动发送日报，也可预览并复制微信群文案。");
     } else {
-      tbody.innerHTML = "";
+      showTableMessage(tbody, "");
+      tbody.replaceChildren();
       for (const ch of channels) {
         const tr = document.createElement("tr");
 
@@ -1816,7 +1877,7 @@ async function loadPushConfigTable() {
       histBar.innerHTML = `<span>支持企业微信群、飞书群、钉钉群、WxPusher（个人微信直推）与自定义 Webhook；密钥仅存本地。</span><span>配置文件：data/push-config.json</span>`;
     }
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="5" class="empty-cell">加载推送配置失败：${err.message}</td></tr>`;
+    showTableMessage(tbody, "加载推送配置失败", err.message);
   }
 }
 
@@ -1852,13 +1913,15 @@ function renderDigestPreviewBody() {
   if (!d) return;
   const isWx = state.digestPreviewFormat === "wx";
   $("btnDigestFormatWx").classList.toggle("active", isWx);
+  $("btnDigestFormatWx").setAttribute("aria-pressed", String(isWx));
   $("btnDigestFormatMd").classList.toggle("active", !isWx);
+  $("btnDigestFormatMd").setAttribute("aria-pressed", String(!isWx));
   $("digestPreviewText").value = isWx ? d.wechatGroupText || "" : d.markdown || "";
   $("digestPreviewMeta").textContent = `${d.title} · 共收录 ${d.articleCount} 篇（涉及 ${d.accountCount} 个公众号 · 近 ${d.hours} 小时）`;
 }
 
 async function openDigestPreviewModal(hoursOverride = null) {
-  $("digestPreviewModal").classList.remove("hidden");
+  openDialog("digestPreviewModal");
   const hours = hoursOverride ?? Number($("optPushHours")?.value || 24);
   $("digestPreviewHours").value = String(hours);
   $("digestPreviewMeta").textContent = "正在汇总归档文章生成日报...";
@@ -1917,34 +1980,32 @@ async function handleSendDigestNow(hoursOverride = null) {
 }
 
 function switchTab(which) {
+  const activePanel = document.querySelector(".workspace-page:not(.hidden)");
+  const changed = which !== state.activeTab;
+  const shouldMoveFocus = changed && activePanel.contains(document.activeElement);
   state.activeTab = which;
-  const isLog = which === "log";
-  const isSubs = which === "subs";
-  const isPush = which === "push";
-  const isArchive = which === "archive";
 
-  $("tabLog").classList.toggle("active", isLog);
-  $("tabLog").setAttribute("aria-selected", String(isLog));
-  $("tabSubs").classList.toggle("active", isSubs);
-  $("tabSubs").setAttribute("aria-selected", String(isSubs));
-  $("tabPush").classList.toggle("active", isPush);
-  $("tabPush").setAttribute("aria-selected", String(isPush));
-  $("tabArchive").classList.toggle("active", isArchive);
-  $("tabArchive").setAttribute("aria-selected", String(isArchive));
+  for (const name of ["Log", "Subs", "Push", "Archive"]) {
+    const selected = name.toLowerCase() === which;
+    const button = $("tab" + name);
+    const panel = $("panel" + name);
+    button.classList.toggle("active", selected);
+    panel.classList.toggle("hidden", !selected);
 
-  $("panelLog").classList.toggle("hidden", !isLog);
-  $("panelSubs").classList.toggle("hidden", !isSubs);
-  $("panelPush").classList.toggle("hidden", !isPush);
-  $("panelArchive").classList.toggle("hidden", !isArchive);
-  $("btnClearLog").classList.toggle("hidden", !isLog);
-
-  if (isSubs) {
-    loadSubscriptionsTable();
-  } else if (isPush) {
-    loadPushConfigTable();
-  } else if (isArchive) {
-    loadArchiveTable();
+    if (selected) {
+      button.setAttribute("aria-current", "page");
+      const heading = panel.querySelector("h1");
+      document.title = heading.textContent + " · 微信文章工作台";
+      if (shouldMoveFocus) heading.focus({ preventScroll: true });
+    } else {
+      button.removeAttribute("aria-current");
+    }
   }
+
+  if (changed) window.scrollTo(0, 0);
+  if (which === "subs") loadSubscriptionsTable();
+  if (which === "push") loadPushConfigTable();
+  if (which === "archive") loadArchiveTable();
 }
 
 function applyDarkMode(enabled) {
@@ -2003,8 +2064,8 @@ function bindEvents() {
 
   // MP Account Name Search Modal controls
   $("btnSearchMpAccount").addEventListener("click", openMpSearchModal);
-  $("btnCloseMpSearchModal").addEventListener("click", () => $("mpSearchModal").classList.add("hidden"));
-  $("btnDoneMpSearchModal").addEventListener("click", () => $("mpSearchModal").classList.add("hidden"));
+  $("btnCloseMpSearchModal").addEventListener("click", () => $("mpSearchModal").close());
+  $("btnDoneMpSearchModal").addEventListener("click", () => $("mpSearchModal").close());
   $("btnMpModalLogin").addEventListener("click", handleMpAdminLogin);
   $("btnMpModalRefresh").addEventListener("click", () => handleRefreshMpAdminStatus(false));
   $("btnMpSearchGo").addEventListener("click", handleMpSearchSubmit);
@@ -2146,21 +2207,24 @@ function bindEvents() {
   });
 
   // WeRead QR modal controls
-  $("btnCloseWeReadModal").addEventListener("click", () => $("wereadLoginModal").classList.add("hidden"));
-  $("btnDoneWeReadModal").addEventListener("click", () => $("wereadLoginModal").classList.add("hidden"));
+  $("btnCloseWeReadModal").addEventListener("click", () => $("wereadLoginModal").close());
+  $("btnDoneWeReadModal").addEventListener("click", () => $("wereadLoginModal").close());
+  $("wereadLoginModal").addEventListener("close", () => {
+    if (!$("wereadLoginModal").open) stopLoginPolling();
+  });
   $("btnRefreshQrImg").addEventListener("click", handleRefreshQrImage);
 
   // Clean local directory modal
-  $("btnCleanLocalDir").addEventListener("click", () => $("cleanDirModal").classList.remove("hidden"));
-  $("btnCloseCleanModal").addEventListener("click", () => $("cleanDirModal").classList.add("hidden"));
-  $("btnCancelCleanModal").addEventListener("click", () => $("cleanDirModal").classList.add("hidden"));
+  $("btnCleanLocalDir").addEventListener("click", () => openDialog("cleanDirModal"));
+  $("btnCloseCleanModal").addEventListener("click", () => $("cleanDirModal").close());
+  $("btnCancelCleanModal").addEventListener("click", () => $("cleanDirModal").close());
   $("btnConfirmCleanDir").addEventListener("click", async () => {
     const inputDir = $("cleanDirPathInput").value.trim();
     if (!inputDir) {
       showToast("请填写待清洗的本地目录路径");
       return;
     }
-    $("cleanDirModal").classList.add("hidden");
+    $("cleanDirModal").close();
     switchTab("log");
     const opts = collectOptions();
     try {
@@ -2272,7 +2336,7 @@ function bindEvents() {
     const raw = $("urlInput").value.trim();
     if (!raw) {
       $("addSubRawInput").value = "";
-      $("addSubModal").classList.remove("hidden");
+      openDialog("addSubModal");
       $("addSubRawInput").focus();
       return;
     }
@@ -2289,11 +2353,11 @@ function bindEvents() {
 
   $("btnOpenAddSubModal").addEventListener("click", () => {
     $("addSubRawInput").value = "";
-    $("addSubModal").classList.remove("hidden");
+    openDialog("addSubModal");
     $("addSubRawInput").focus();
   });
-  $("btnCloseAddSubModal").addEventListener("click", () => $("addSubModal").classList.add("hidden"));
-  $("btnCancelAddSubModal").addEventListener("click", () => $("addSubModal").classList.add("hidden"));
+  $("btnCloseAddSubModal").addEventListener("click", () => $("addSubModal").close());
+  $("btnCancelAddSubModal").addEventListener("click", () => $("addSubModal").close());
   $("btnConfirmAddSub").addEventListener("click", async () => {
     const btn = $("btnConfirmAddSub");
     btn.disabled = true;
@@ -2303,7 +2367,7 @@ function bindEvents() {
         category: $("addSubCategoryInput").value.trim() || "默认订阅",
         since: $("addSubSinceInput").value || "",
       });
-      if (ok) $("addSubModal").classList.add("hidden");
+      if (ok) $("addSubModal").close();
     } finally {
       btn.disabled = false;
       btn.textContent = "确认加入订阅";
@@ -2323,8 +2387,8 @@ function bindEvents() {
   $("btnSendDigestNow").addEventListener("click", () => handleSendDigestNow());
 
   $("pushChannelType").addEventListener("change", syncPushModalFields);
-  $("btnClosePushModal").addEventListener("click", () => $("pushChannelModal").classList.add("hidden"));
-  $("btnCancelPushModal").addEventListener("click", () => $("pushChannelModal").classList.add("hidden"));
+  $("btnClosePushModal").addEventListener("click", () => $("pushChannelModal").close());
+  $("btnCancelPushModal").addEventListener("click", () => $("pushChannelModal").close());
   $("btnSavePushChannel").addEventListener("click", async () => {
     const payload = collectPushChannelModalPayload();
     try {
@@ -2335,7 +2399,7 @@ function bindEvents() {
       });
       const data = await res.json();
       if (!res.ok) return showToast(data.error || "保存失败");
-      $("pushChannelModal").classList.add("hidden");
+      $("pushChannelModal").close();
       appendLog(`✓ 已保存推送通道：${data.channel.name} (${data.channel.targetHint})`, "ok");
       showToast(`已保存推送通道 ${data.channel.name}`);
       await loadPushConfigTable();
@@ -2371,8 +2435,8 @@ function bindEvents() {
     }
   });
 
-  $("btnCloseDigestModal").addEventListener("click", () => $("digestPreviewModal").classList.add("hidden"));
-  $("btnDoneDigestModal").addEventListener("click", () => $("digestPreviewModal").classList.add("hidden"));
+  $("btnCloseDigestModal").addEventListener("click", () => $("digestPreviewModal").close());
+  $("btnDoneDigestModal").addEventListener("click", () => $("digestPreviewModal").close());
   $("btnDigestFormatWx").addEventListener("click", () => {
     state.digestPreviewFormat = "wx";
     renderDigestPreviewBody();
@@ -2415,9 +2479,9 @@ function bindEvents() {
   });
 
   // Preview drawer
-  $("btnClosePreview").addEventListener("click", () => $("previewDrawer").classList.add("hidden"));
+  $("btnClosePreview").addEventListener("click", () => $("previewDrawer").close());
   $("previewDrawer").addEventListener("click", (e) => {
-    if (e.target === $("previewDrawer")) $("previewDrawer").classList.add("hidden");
+    if (e.target === $("previewDrawer")) $("previewDrawer").close();
   });
   $("btnCopyPreview").addEventListener("click", async () => {
     if (!state.previewRawText) return;
